@@ -30,11 +30,19 @@ enemy_sync = {
 }
 local es = enemy_sync
 
+-- Lines are collected and appended once a second (was a full read + rewrite per line).
+local log_buf, log_t = {}, 0
 local function log(s)
+    log_buf[#log_buf + 1] = os.date("%H:%M:%S ") .. tostring(s)
+end
+re.on_frame(function()
+    if #log_buf == 0 or os.clock() - log_t < 1 then return end
+    log_t = os.clock()
     local f = fs.read("coop_enemies_log.txt") or ""
     if #f > 200000 then f = f:sub(-100000) end
-    fs.write("coop_enemies_log.txt", f .. os.date("%H:%M:%S ") .. s .. "\n")
-end
+    fs.write("coop_enemies_log.txt", f .. table.concat(log_buf, "\n") .. "\n")
+    log_buf = {}
+end)
 
 local function safe(f, ...)
     local ok, r = pcall(f, ...)
@@ -202,6 +210,8 @@ local function on_damage(id, ch, amount, name)
     if e == nil or e.dead or safe(e.go.call, e.go, "get_Update") ~= true then return end
     local hp = e.dc:call("get_health") or 0
     local new = math.max(hp - amount, 1.0)
+    -- No flinch: neither addManualDamage nor addHitDamage (even with Stun, PriorityMax and
+    -- a body part set) plays a hit reaction; those come from the collision pipeline.
     e.dc:call("setHealth(System.Single, System.Single)", new, e.dc:call("get_maxHealth"))
     e.hp = e.dc:call("get_health")
     es.applied_dmg = (es.applied_dmg or 0) + 1
@@ -209,10 +219,18 @@ local function on_damage(id, ch, amount, name)
 end
 
 local function on_event(text)
-    -- Doors and items belong to coop_world.lua.
+    -- Character looks belong to coop_dummy.lua's lobby; doors and items to coop_world.lua.
+    if coop_lobby_on_event and coop_lobby_on_event(text) then return end
     if coop_world_on_event and coop_world_on_event(text) then return end
     if coop_story_on_event and coop_story_on_event(text) then return end
     if coop_revive_on_event and coop_revive_on_event(text) then return end
+    local pz = text:match("^pause ([01])")
+    if pz then
+        mv.friend_paused = pz == "1"
+        mv.friend_paused_t = os.clock()
+        note(mv.friend_paused and "your friend paused the game" or "your friend is back")
+        return
+    end
     local oid, och, oname = text:match("^own (%S+) (%-?%d+) (%S+)")
     if oid then if enemy_move_on_own then enemy_move_on_own(oid, tonumber(och), oname) end return end
     local did, dch, damt, dname = text:match("^dmg (%S+) (%-?%d+) ([%d%.]+) (%S+)")
@@ -337,21 +355,110 @@ end
 
 local function yaw_of(q) return 2 * math.atan(q.y, q.w) end
 
+-- Held weapons. Each enemy's app.EquipManager has its own weapons (ManagedWeapons; Jack:
+-- Shovel, Roller, FireAxe). In hand = drawn and parented to the enemy. EquipWeaponIdRight
+-- stays 0 whatever is held, so it can't be read. equipWeapon(WeaponID, Hand) attaches and
+-- shows one but never puts the previous one away, so a follower shows the friend's weapon
+-- (by name, equipped if needed) and hides the rest itself.
+local function equip_of(e)
+    if e.equip == nil then
+        e.equip = safe(e.go.call, e.go, "getComponent(System.Type)", sdk.typeof("app.EquipManager")) or false
+    end
+    return e.equip or nil
+end
+
+local weapon_ids = nil   -- "Shovel" -> app.WeaponID value
+local function weapon_id(name)
+    if weapon_ids == nil then
+        weapon_ids = {}
+        local td = sdk.find_type_definition("app.WeaponID")
+        for _, f in ipairs(td and td:get_fields() or {}) do
+            if f:is_static() then weapon_ids[f:get_name()] = safe(f.get_data, f, nil) end
+        end
+    end
+    return weapon_ids[name]
+end
+
+local function weapons_of(e)
+    local eq = equip_of(e)
+    local list = eq and safe(eq.get_field, eq, "ManagedWeapons")
+    local out = {}
+    for i = 0, (list and list:call("get_Count") or 0) - 1 do
+        local w = list:call("get_Item", i)
+        local go = w and safe(w.call, w, "get_GameObject")
+        if go then out[#out + 1] = go end
+    end
+    return out
+end
+
+local function held_weapon(e)
+    for _, go in ipairs(weapons_of(e)) do
+        local parent = safe(function() return go:call("get_Transform"):call("get_Parent") end)
+        if parent and go:call("get_Draw") and parent:call("get_GameObject") == e.go then return go:call("get_Name") end
+    end
+    return "-"
+end
+
+-- Follower: show exactly `want` ("-" = none). Hidden ones are remembered so the enemy's
+-- own AI gets them back when the follower is released.
+local function show_weapon(e, want)
+    if e.cur_weapon == want then return end
+    e.cur_weapon = want
+    e.hidden_weapons = e.hidden_weapons or {}
+    local found = false
+    for _, go in ipairs(weapons_of(e)) do
+        local name = go:call("get_Name")
+        if name == want then
+            found = true
+            local parent = safe(function() return go:call("get_Transform"):call("get_Parent") end)
+            if not (parent and parent:call("get_GameObject") == e.go) then
+                local id = weapon_id(want)
+                local eq = equip_of(e)
+                if id and eq then pcall(eq.call, eq, "equipWeapon(app.WeaponID, app.CharacterDefine.Hand)", id, 0) end
+            end
+            pcall(go.call, go, "set_DrawSelf", true)
+            e.hidden_weapons[name] = nil
+        elseif go:call("get_Draw") then
+            pcall(go.call, go, "set_DrawSelf", false)
+            e.hidden_weapons[name] = go
+        end
+    end
+    log(string.format("follower %s holds %s%s", e.name, want, (want ~= "-" and not found) and " (not in its weapon list)" or ""))
+end
+
+-- Its own AI is back: keep the weapon the friend last reported. Un-hide only weapons
+-- that are no longer attached to the enemy (put away); one still attached would show as
+-- a second weapon in hand (Jack ended up with the axe and the shovel).
+local function restore_weapons(e)
+    for name, go in pairs(e.hidden_weapons or {}) do
+        local parent = safe(function() return go:call("get_Transform"):call("get_Parent") end)
+        local attached = parent ~= nil and parent:call("get_GameObject") == e.go
+        if not attached then pcall(go.call, go, "set_DrawSelf", true) end
+    end
+    e.hidden_weapons, e.cur_weapon = nil, nil
+end
+
 local function enemy_line(e)
     local tr = e.go:call("get_Transform")
     local p, q = tr:call("get_Position"), tr:call("get_Rotation")
     local L = layer0(e)
     if L == nil then return nil end
-    return string.format("%s %.3f %.3f %.3f %.4f %d %d %.2f %.3f", e.id, p.x, p.y, p.z, yaw_of(q),
-        L:call("get_MotionBankID") or 0, L:call("get_MotionID") or 0, L:call("get_Frame") or 0, L:call("get_Speed") or 1)
+    return string.format("%s %.3f %.3f %.3f %.4f %d %d %.2f %.3f %s", e.id, p.x, p.y, p.z, yaw_of(q),
+        L:call("get_MotionBankID") or 0, L:call("get_MotionID") or 0, L:call("get_Frame") or 0, L:call("get_Speed") or 1,
+        safe(held_weapon, e) or "-")
 end
 
 local function parse_line(line)
-    local id, x, y, z, yaw, bank, mid, frame, speed =
-        line:match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%-?%d+) (%S+) (%S+)$")
+    local id, x, y, z, yaw, bank, mid, frame, speed, weapon =
+        line:match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%-?%d+) (%S+) (%S+) (%S+)$")
+    if id == nil then
+        id, x, y, z, yaw, bank, mid, frame, speed =
+            line:match("^(%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+) (%-?%d+) (%S+) (%S+)$")
+    end
     if id == nil then return nil end
     return id, { x = tonumber(x), y = tonumber(y), z = tonumber(z), yaw = tonumber(yaw),
-        bank = tonumber(bank), mid = tonumber(mid), frame = tonumber(frame), speed = tonumber(speed) }
+        bank = tonumber(bank), mid = tonumber(mid), frame = tonumber(frame), speed = tonumber(speed),
+        weapon = weapon }
 end
 
 local function push_hist(id, s, t)
@@ -366,7 +473,9 @@ end
 local function write_snapshot(now)
     local lines = { "seq " .. mv.seq, string.format("t %.3f ch %d", now, chapter()) }
     for _, e in pairs(es.tracked) do
-        if safe(e.go.call, e.go, "get_Update") == true and not mv.puppets[e.id] and mv.own[e.id] ~= "peer" then
+        -- The host sends every enemy it runs; the guest only the ones handed to it.
+        local mine = mv.own[e.id] == "me" or (mv.role == "host" and mv.own[e.id] ~= "peer")
+        if mine and safe(e.go.call, e.go, "get_Update") == true and not mv.puppets[e.id] then
             local l = safe(enemy_line, e)
             if l then lines[#lines + 1] = l end
         end
@@ -395,8 +504,12 @@ local function read_snapshot(now)
         if id then
             -- Both games running it: the host keeps it, the other side gives way.
             local take = true
-            if mv.own[id] == "me" then
-                if mv.role == "host" then take = false
+            if mv.role == "host" then
+                -- The host only follows enemies it handed to the guest.
+                take = mv.own[id] == "peer"
+            elseif mv.own[id] == "me" then
+                -- Just handed to us: a snapshot the host sent a moment before still has it.
+                if now - (mv.own_t[id] or 0) < 1 then take = false
                 else mv.own[id], mv.own_t[id] = "peer", now end
             elseif mv.own[id] == nil then
                 mv.own[id], mv.own_t[id] = "peer", now
@@ -418,6 +531,7 @@ local function order_of(e)
 end
 
 local function set_brain(e, on)
+    if on then pcall(restore_weapons, e) end   -- its own AI decides what to hold again
     local fsm = safe(e.go.call, e.go, "getComponent(System.Type)", sdk.typeof("via.motion.MotionFsm"))
     if fsm then safe(fsm.call, fsm, "set_Enabled", on) end
     local order = order_of(e)
@@ -500,6 +614,8 @@ local function drive(e, h, now)
         if math.abs(f - target) > 4 then safe(L.call, L, "set_Frame", target) end
     end
     safe(L.call, L, "set_Speed", s.speed)
+    -- Same weapon in hand as in the friend's game (applied only when it changes).
+    if s.weapon then pcall(show_weapon, e, s.weapon) end
 end
 
 -- Saves: an enemy's save data holds its ThinkState and IsUpdate, so a follower saved with
@@ -540,14 +656,20 @@ end
 local function dist2(a, b) return (a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2 end
 
 function check_handoffs(now)
-    -- The bot can't run enemies: in bot mode only the test button hands one over.
-    if net_kv().mode == "bot" then return end
+    -- Only to a real friend: the bot can't run enemies (in bot mode only the test button
+    -- hands one over). Require "steam" rather than "not bot": a status file read while
+    -- it was being rewritten has no mode line, and that once handed Jack to the bot.
+    if net_kv().mode ~= "steam" then return end
+    -- See watch_pause. A "paused" that never got its "back" (they quit) expires after 10 min.
+    if mv.friend_paused and now - (mv.friend_paused_t or 0) > 600 then mv.friend_paused = false end
+    if mv.friend_paused or mv.paused then return end
     local g = friend_pos()
     local player = sdk.get_managed_singleton("app.ObjectManager"):get_field("PlayerObj")
     if g == nil or player == nil then return end
     local p = player:call("get_Transform"):call("get_Position")
     for _, e in pairs(es.tracked) do
-        if mv.own[e.id] ~= "peer" and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
+        local cooling = mv.no_handoff and (mv.no_handoff[e.id] or 0) > now
+        if mv.own[e.id] ~= "peer" and not cooling and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
             local ep = e.go:call("get_Transform"):call("get_Position")
             -- 3 m of hysteresis so it doesn't bounce between games.
             if math.sqrt(dist2(ep, g)) + 3 < math.sqrt(dist2(ep, p)) then hand_off(e, now) end
@@ -564,13 +686,41 @@ function enemy_move_on_own(id, ch, name)
     note("your friend handed " .. name .. " to you")
 end
 
+-- Pausing (pause menu, inventory, map) freezes this game, enemies it runs included, while
+-- the friend plays on (2026-11-02 session). On pause: tell the friend and hand them every
+-- enemy we run; nothing is handed to a paused player. Unpausing changes nothing at once:
+-- enemies come back by distance as usual.
+local function is_paused()
+    local gm = sdk.get_managed_singleton("app.GameManager")
+    if gm and safe(gm.call, gm, "get_IsPause") == true then return true end
+    local mm = sdk.get_managed_singleton("app.MenuManager")
+    return mm ~= nil and safe(mm.call, mm, "isOpenPauseMenu") == true
+end
+
+local function watch_pause(now)
+    local paused = is_paused()
+    if paused == (mv.paused or false) then return end
+    mv.paused = paused
+    if net_kv().mode ~= "steam" then return end
+    send_event(paused and "pause 1" or "pause 0")
+    if not paused then return end
+    for _, e in pairs(es.tracked) do
+        if mv.own[e.id] ~= "peer" and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
+            hand_off(e, now)
+        end
+    end
+end
+
 local function update_movement(now)
+    pcall(watch_pause, now)
     mv.role = decide_role()
-    if mv.role == "host" and now - mv.snap_t >= SNAP_EVERY then
+    -- Both games send and read: an enemy handed to the guest is sent back by the guest
+    -- (host-only sending made every hand-off fail after 3 s, Jack 2026-11-02).
+    if now - mv.snap_t >= SNAP_EVERY then
         mv.snap_t = now
         pcall(write_snapshot, now)
     end
-    if mv.role == "guest" and not mv.replay and now - mv.in_t >= 1 / 30 then
+    if not mv.replay and now - mv.in_t >= 1 / 30 then
         mv.in_t = now
         pcall(read_snapshot, now)
     end
@@ -579,7 +729,8 @@ local function update_movement(now)
     if r then
         while r.i <= #r.frames and r.frames[r.i].rt <= now - r.t0 do
             local f = r.frames[r.i]
-            push_hist(r.id, { x = f.x, y = f.y, z = f.z, yaw = f.yaw, bank = f.bank, mid = f.mid, frame = f.frame, speed = f.speed }, now)
+            push_hist(r.id, { x = f.x, y = f.y, z = f.z, yaw = f.yaw, bank = f.bank, mid = f.mid, frame = f.frame,
+                speed = f.speed, weapon = f.weapon }, now)
             r.i = r.i + 1
         end
         if r.i > #r.frames and now - r.t0 > r.frames[#r.frames].rt + 3.5 then
@@ -606,6 +757,10 @@ local function update_movement(now)
                 mv.hist[id] = nil
                 mv.takebacks = mv.takebacks + 1
                 log("took back " .. e.name .. " " .. id .. " (no data from the friend for 3 s)")
+                -- Their game couldn't run it (asleep or elsewhere in their story): handing it
+                -- straight back made Jack flicker between games every few seconds (2026-11-02).
+                mv.no_handoff = mv.no_handoff or {}
+                mv.no_handoff[id] = now + 30
             elseif mv.handed[id] and mv.puppets[id] == nil then
                 puppetize(e)   -- just handed over: hold still until their data arrives
             end
@@ -653,6 +808,7 @@ end)
 
 -- For the on-screen status (coop_dummy shows it for 6 s).
 function enemy_sync_hud()
+    if mv.friend_paused then return "Your friend paused the game" end
     if os.clock() - es.msg_t < 6 then return "Enemies: " .. es.last_msg end
     return nil
 end

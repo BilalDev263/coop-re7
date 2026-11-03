@@ -770,3 +770,224 @@ folder, missing sounds for player 2, RT build only.
   `TriggerInSuccessCount` 1, IsLoop false: already fired while saving was blocked; 1100_AutoSave_BeforeHall not
   active yet). Warping into a zone triggers nothing. `SaveDataManager.saveFileMenuRequest(player)` didn't open
   the save menu (needs a real recorder). Real-save test still pending.
+
+## Enemy weapons and flinch (2026-11-02)
+
+- Weapons: `app.EquipManager` (on Jack): `EquipWeaponIdRight/Left` (app.WeaponID: 0 Hand, 1 HandAxe, 2
+  CircularSaw, 3 Knife, 4 Bar, 5 Handgun...), `equipWeapon(WeaponID, CharacterDefine.Hand)` (Right 0, Left 1),
+  `EquipWeaponTrack` (equips from animation tracks). Enemy snapshot lines now end with the right/left weapon IDs
+  (old 9-field lines still parse); a follower equips them when they change. Jack held 0/0 (bare hands) in the
+  Chapter3 tests, so the earlier "hands around nothing" was his animation; weapon copying is untested by eye.
+- Flinch: neither `DamageController.addManualDamage` nor `addHitDamage` with a `newFakeDamageInfo` plays a hit
+  reaction, even with `Stun`/`StunMax` 1000, `PriorityMax` 20 and `Parts` Head/Chest, with Jack's AI on or off
+  (clip unchanged for 3 s; the owner saw nothing). Reactions come from the collision hit pipeline
+  (HitController / attack colliders). Parked; damage stays `setHealth`.
+- Bug fixed: `check_handoffs` skipped only when mode == "bot"; a status file read mid-rewrite had no mode line
+  and Jack was handed to the bot. Now handovers require mode == "steam".
+- Calming an enemy for tests: `EnemyOrder.requestThinkOff(owner)` keeps it standing with animations running.
+- Twitchy bot head (2026-11-02): the follow-me bot replays the player's own look values; mouse flicks (pitch
+  -0.71 → -0.11 rad in 0.5 s) and one-sample yaw spikes when the body lags the camera in fast turns. A real
+  friend would look the same. Fix on the receiving side: head look eased with LOOK_TAU = 0.12 s. Owner:
+  "smooth now".
+- **Weapon copying, reworked and tested 2026-11-02**: Jack's `EquipManager.ManagedWeapons` = Shovel, Roller,
+  FireAxe. `equipWeapon(WeaponID, Right)` (Shovel 34, FireAxe 41) attaches and shows one (owner saw the shovel)
+  but never puts the previous one away (both drawn), `equipWeapon(Hand 0)` doesn't clear, and
+  `EquipWeaponIdRight` stays 0, `equipWeapon(Weapon object)` threw. So the owner sends the *name* of the managed
+  weapon that is drawn and parented to the enemy ("-" = none); the follower equips it if needed and
+  `set_DrawSelf(false)` the others (restored when its AI comes back). Test: recorded Jack with the FireAxe,
+  swapped him to the Shovel by hand, replayed → "follower Em3000 holds FireAxe", Shovel hidden, FireAxe shown.
+  (First replay didn't pass the weapon field from the recording; fixed.)
+- When the replayed Jack got his AI back, un-hiding every hidden weapon left him holding the axe and the shovel
+  (both still attached). Now only weapons no longer attached to the enemy are un-hidden; the last reported
+  weapon stays the only one in hand.
+
+## Pause menu blocked (2026-11-02)
+MenuManager.isCanOpenPauseMenu(Normal) returned false in plain gameplay because
+MenuManager.IsPlayInGameFullScreenMovie stayed true after a cut-short cutscene video. Clearing it
+(set_IsPlayInGameFullScreenMovie(false)) brought pause back. coop_dummy.lua now clears it when no
+cutscene runs and isCanInteract has been true for 5 s.
+
+## Flinch and early-game Jack
+Ch3 Jack (before Ethan has a gun) may have no small hit reactions at all; his resist parameters are a
+poor test. ResistResult {Succeeded 0, Damaged 1, Lost 2, BlownAway 3, ...}; EnemyResistType {Small 0,
+Middle 1, Large 2, ...}; EnemyResistParts {Chest 0, Stomach 1, Head 2, ...}. Next: requestDamageAction
+with a ResistResultSet, tested on a Molded (Ch4+).
+
+## Reload hang after chapter jumps (2026-11-02)
+"Reload last save" in a jumped-to Chapter4_Start: loadFileAutoRequest(slot 0) requested at 18:55:40, then
+the game retried an internal dataSaveD that coop_saveguard blocks (90+ times) and sat on the pause menu
+with the loading icon. Restart was the way out. TODO: refuse Reload after a chapter jump, or find what
+dataSaveD writes before letting it through.
+
+## First launch with no save data (2026-11-02, friend's install)
+A player with no RE7 save gets "create save data?" at boot; coop_saveguard (allow_saving off by default)
+blocks it, so Yes = "failed to save" and No loops back. Workaround: Insert -> RE7 Co-op -> tick Allow
+saving, then Yes. TODO: let the first system save through when the save folder is empty, or default
+allow_saving on for a fresh install with no saves.
+
+## Friend install: OneDrive Documents (2026-11-02)
+Friend's Documents is OneDrive-synced (path ...\OneDrive\Documents\RE7-coop). The copy was 30.1 GB of
+~64 GB; the game ran (menus, cutscene audio, connected over Steam) but the world rendered black.
+REFramework log clean (D3D12 hooked; only Streamline/Present 87a0001 noise). Installer now defaults to
+C:\RE7-coop (and C:\RE7-coop-save-backups) when Documents is under OneDrive, and refuses a OneDrive
+-Destination. Share story was also suspected first (friend joined mid-opening); not the cause.
+- Resolution: the black screen was not the copy. The friend had no save and connected (and jumped)
+  from the very start; once he started a New Game and played the opening alone, it rendered normally.
+  README now says: new players play the opening before connecting; tick Allow saving for the first save.
+
+## First two-player session findings (2026-11-02, evening)
+Working: connect + rich-presence invite, seeing each other, auto-reconnect on Continue, door opens
+received and applied (my side: applied 2), "friend saved" notices.
+Not synced / broken, as reported by the owner:
+- Doors: only "opened" is sent; closing isn't, so one player's door is shut while the other walks through.
+- Not covered yet: van door at the start, drawers, fridge, pot of food, examine/rotate puzzles (Mia's ID),
+  key items (left in both worlds by design).
+- VHS tapes: each player inserts the tape alone; the tape is its own chapter, so the two drift apart until
+  "Go to my friend's chapter". Want: when the friend enters a tape/chapter, offer to follow (or auto-follow).
+- Scripted NPCs (the tape crew) run on each player's own progress, so they're out of step between games.
+- Need the friend's logs (coop_world/enemies/story/dummy) to see why my door opens didn't show for him.
+- Pause menu desyncs: a paused game stops sending/running (ghost freezes for the other player, enemies it
+  owns stop, events pile up). Plan: send a "paused" flag; show "Your friend paused"; hand enemies the
+  paused player owns to the other; maybe optional pause-both.
+- Tape (Chapter0, player is the camera-crew character): ghost built from pl3000/pl3020.mesh with the
+  pl0000 motbank; pl0000_Idle froze (end=284, want -1) -> rebuild_layer -> "idle fallback -> walk held at
+  frame 0", walk speed 0.0, and no further clip changes logged: the friend slides around in a stiff pose.
+  Fix: in tape chapters drive the ghost with the local character's own motbank (pl3000/pl2000 clips),
+  mapping walk/jog/idle by name.
+- Slide fix (coop_dummy.lua): after the idle fell back to "walk held at frame 0", walking forward picked
+  that same clip, so the hold code set speed 0 and the stride code skipped it (want == anim.idle): the
+  friend slid. Also idle_hold carried over to the next ghost, freezing a good idle (speed 0) so it got
+  retired. Now: hold only while not moving, stride-rate whenever moving, idle_hold reset on rebuild.
+- Tape ended for both at once: my game's evend for the tape event (9e2a3726, 19:48:49) with Share story
+  on ended the friend's tape too, though he was at a different point. Story "evend" should not end a
+  chapter-length event (tapes) for a player who is behind; consider only following cutscenes, not tapes.
+- Basement ladder: c01e00_01_Controller stays in RunningEventControllers while the player has control
+  (MenuManager.isPlayingEvent false), so local_cutscene() hid the friend for good (and sent the cutscene
+  flag). Now an event only counts when isPlayingEvent isn't false. To verify: isPlayingEvent is true
+  during real cutscenes (else the ghost shows in cutscenes). No ladder animation on the ghost yet.
+- Handgun freeze: I took Handgun_M19 (20:20:05) and the friend's copy was disabled while he was picking it
+  up: stuck in the inspect pose. Weapons (ItemCategoryType 1) now stay in both worlds.
+- Friend's screen washed out / bright with broken textures after shared story (c01e05_00/02 pulled from his
+  side, evend 46ba27ae from his side ended mine). Likely a lighting/exposure state left by a forced
+  cutscene. Share story needs rethinking: off by default until it only follows short cutscenes.
+- Breakable boxes: destroying one (axe) isn't synced.
+- The ghost shows no weapon, swing or shot: the friend never sees you attack. Needs held-weapon + attack
+  animations on the ghost (and a muzzle flash/sound).
+- Handgun: friend recovered by leaving and rejoining; weapon fix (coop_world KEYISH 1) not installed on his
+  side yet at that point.
+- Mia fight (20:25): shared damage WORKED both ways (friend's hits 204 each applied here: 1556 -> 332;
+  "your friend took down Em2000"; my hits sent). First real two-player enemy sync success.
+- After Mia: my game went chapter 4 -> 13 (Chapter123, c01e08_00, c03e04_00) -> 5 (dinner, c03e00_*).
+  Friend sat on a black loading screen until "Go to my friend's chapter"; then started the dinner later.
+  Need his story/dummy logs: was Share story still on, did he receive c01e08_00/c03e04_00 in another chapter?
+- Dinner: after I rocked the chair, the friend could rock his chair in the middle of his (later) dinner cutscene: my story progress was copied ahead of his cutscene (Share story prog), so his game skipped ahead to my step.
+- Jack (20:31-20:35): my game handed Em3000 to the friend every few seconds and took it back each time
+  ("no data from the friend for 3 s"): his game never ran Jack (asleep/elsewhere in his story?). That is the
+  "glitching Jack" on his screen, and why Jack only chased me (my game's AI targets my player). Added a
+  30 s no-handoff cooldown after a take-back. Root cause needs the friend's coop_enemies_log.
+- Jack bursting through the hatch-room wall: not synced (scripted event). Leg-cut sequence: the ghost
+  T-poses (no animation for the scripted pose).
+- Revive happened for real: down 20:32 / 20:58 / 21:03 (old log lines aside), "up" within a minute.
+- Friend's REFramework log (19:27-20:39): coop_settings.json read as empty 33 times (read during a
+  write: settings may revert, e.g. Share story); warp/get_Update exceptions burst at 20:02:00 (enemy freed
+  during a load); one equipWeapon exception. No script crash.
+
+## Friend's co-op logs (2026-11-02 session) and fixes
+- ROOT CAUSE of every failed enemy hand-off: snapshots were host-only (host writes, guest reads). A guest
+  handed an enemy ran it but never sent it, so the host took it back after 3 s; the guest then saw the
+  host's snapshots again and puppeted it ("handed to you" / "puppet on" every few seconds in his log).
+  Bot tests never caught it (the bot can't own). Fix: both games write and read; the guest sends only
+  enemies handed to it ("me"); the host follows only enemies it handed away ("peer"); a host snapshot in
+  flight within 1 s of a hand-off is ignored by the guest. Plus the 30 s cooldown after a take-back.
+- Mia (Em2000) fights: damage both ways confirmed from both logs (his hits 1300/100/85..., takedowns, kill).
+  Follower copied her held items (KitchenKnife, WoodChip, ScrewDriver, ChainSaw), so weapon copying works live.
+- Doors: his game sent many opens; no apply logging existed, so it can't be told whether mine applied on his
+  side. Added "close" events (requestClosed(false) on the other side) and apply logs (state before/after).
+- Story: his game ignored my c01e08_00 / c03e04_00 / c03e00_00 as "another chapter" while still in chapter 4
+  after Mia, so his own chapter change didn't happen (stuck loading) until he jumped. Share story is now OFF
+  by default (sharing() requires settings.share_story == true); label marked experimental.
+- His coop_settings.json had no share_story key (= on under the old default) and allow_saving true.
+- Revive: his log "your friend is down - go to them!" 20:32:26 -> "back up" 20:32:40. Works for real.
+- Added (untested in game): box sync (ItemDropDestruct.IsBreaked -> "break"; apply RigidBodyCompo.setBreak
+  (down, pos, up, nil, 0)), drawer sync (InteractDrawer.NowDrawerOpen -> "drawer id 0|1"; apply
+  SetSwitch(bool)), bot buttons for both; pause watch (GameManager.get_IsPause or MenuManager
+  isOpenPauseMenu -> "pause 1/0"; paused side hands all its enemies over; no hand-offs to a paused friend;
+  HUD line). Saveguard keeps the last good allow_saving on a failed read.
+- Syntax checks now use Lua via lupa (local/build/luavenv + local/build/luacheck.py): the in-game exec check
+  read a stale coop_exec_out.txt after the game had closed (20:37), so checks between 20:37 and 20:50 were
+  void; all scripts re-checked OK.
+- Body-animation research: added local/re7-test/.../autorun/coop_animrec.lua (TEST COPY ONLY) that logs
+  every clip change on every Motion layer of the player object and its children to coop_animrec_log.txt.
+  Goal: find what the local full body plays for attacks, shots, ladders, interactions, so the sender can put
+  the body's own clip in the packet and the ghost can mirror it. Note: all pl0000 banks report BankID 0
+  (Hands, Knife, Ax, Handgun... share an ID), so a clip is identified by motion ID within the active bank.
+- Share story rework (untested): a friend's "story" only plays here when same chapter and the friend's Ethan
+  is within 12 m (else a note, no play); pending-for-load only 10 s and only while still near; prog/evend
+  copied only during 30 s "in step" after we were pulled into one of their cutscenes. Off by default.
+- QoL batch (untested in game): logs buffered and written once a second in every script (coop_dummy used to
+  rewrite its whole log twice per line; per-load coop_dummy_log_HHMMSS files replaced by coop_dummy_log_prev);
+  look-diag log every 60 s instead of 2 s; Reload last save refused after a chapter jump; "Make a bug
+  report" button -> CoopNet "report" command copies coop logs/settings/status/config + re2_framework_log to
+  Desktop\coop-re7-report-<stamp>, blanks SteamIDs, Steam names (ours + friend list) and the Windows user
+  name, then zips it with PowerShell Compress-Archive. CoopNet.cs compiles (local/build/coopnet-check).
+- Friend "in another chapter" HUD prompt already existed.
+- Requests after the session (2026-11-02): (1) lobby UI with character choice, using characters made for "the
+  3rd person mod we referenced" (which mod: to ask; can't ship other mods' assets, could load them if the
+  player has that mod installed); (2) friend's block / gimmick-inspect / phone pickup animations missing on
+  the ghost (same fix as body-clip mirroring; needs coop_animrec data); (3) hatch key: both had to pick it
+  up, and the wall break (Jack) followed the friend's pickup. Idea: share key pickups by running the item's
+  own pickup on the other side so scripted events (the wall) fire for both; needs in-game research.
+
+## Lobby + character picker (2026-11-02, untested)
+- RE7 Co-op window gets a "Lobby" section: both players, chapters, "You appear to your friend as" combo
+  (settings.look), "Go to my friend's chapter". Pick is sent as event "look <key>" (re-sent every 15 s while
+  connected); coop_lobby_on_event (called first in coop_enemies on_event) stores lobby.friend_look and
+  rebuilds the ghost. In bot mode: "Dress the bot as" buttons.
+- dress_as_friend_choice(shadow) in assemble_from: keeps ShadowBody/ShadowHead pieces, swaps their holders
+  for create_resource'd plXX01/plXX50 mesh+mdf2, drops Ethan's other Shadow* pieces, src=nil (no material
+  var copy). Characters: Ethan pl0000 (pl0001+pl0050), Ethan event head (pl0051), Mia tape pl2000
+  (pl2001+pl2050), Mia ship pl2100 (pl2101+pl2150), Clancy pl3000 (pl3001+pl3050); all seen in logs as
+  ShadowBody/ShadowHead of their chapter's player. Chris/Zoe/Joe: paths unknown (DLC paks present).
+- Risk: create_resource returns an object even for missing files, so a wrong path shows nothing (or worse);
+  all paths above were seen loaded in this game.
+- Lobby test 1 (21:15, bot): all looks missing legs/feet (only ShadowBody+ShadowHead were swapped; the sets
+  are Body XX01, LowerBody XX02, Head XX50, HandL/HandR), Mia's face black (plain-game shadow heads have no
+  real face). Nexus RE7 mod 86 "Third Person Full Model Placeholders" file list (RT): replaces under the same
+  paths natives/stm/character/player/{pl0000/pl0001,pl0002; pl2000/pl2001,pl2002,pl2010,pl2020;
+  pl2100/pl2101,pl2102,pl2110,pl2120; pl3000/pl3001,pl3002; pl3100/pl3101,pl3102 (Clancy DLC);
+  pl3400/pl3401,pl3402 + pl3450 face tex (Zoe)}, ch8/character/player/pl1000/pl1001,pl1002 (Chris),
+  ch9/character/player/pl9000/pl9001,pl9002 + pl9050 face tex (Joe). So: dress all five pieces; with the mod
+  installed (CoopNet fullModels=1, detected by natives/stm/character/player/pl2000/pl2001/pl2001.mesh.220128762)
+  the same paths give complete models. Each player installs it themselves (not ours to ship). DLC resource
+  path guessed as "ch8/Character/Player/..." (untested).
+- Lobby test 2 (21:27): legs fixed. Mod files copied into the test copy's natives, but re2_fw_config LooseFileLoader_Enabled=false, so the game ignored them (Mia black face, Chris no head, Zoe/Joe no arms). fullModels now '1' / 'off' / '0' (loader state read from re2_fw_config.txt, rechecked every 10 s). Added Zoe hands pl3410/pl3420 (from the mod) and guessed Chris/Joe hands + Chris head (pl1010/1020/1050, pl9010/9020).
+- 2026-11-03: enabled LooseFileLoader_Enabled=true in the test copy's re2_fw_config.txt (game closed; backup re2_fw_config.txt.bak-before-loose). In the menu it's REFramework > LooseFileLoader > Enable. TODO: installer could turn it on so friends only need to drop in the mod.
+- Lobby test 3 (after enabling the loader): Chris and Clancy good. Mia black head + Zoe head misplaced: the mod's
+  bodies (XX01) already include the head (its Mia/Zoe/Joe/Clancy head packs ship only XX01/XX02 + hands), so our
+  extra game shadow head XX50 sat on top. Joe: no hands (guessed pl9010/pl9020 don't exist; mod ships none).
+  First-person view clipped into Ethan's head: the mod replaces the local player's own pl0001.
+  Fix: package/.../use-full-models.ps1 + "Use full models.cmd" move the mod's *.mesh.*/*.mdf2.* to
+  natives\stm\coop\..., enable LooseFileLoader; lobby loads "coop/<path>" for MODDED pieces and drops
+  ShadowHead when the body is modded. fullModels: 1 / off / move / 0. Untested: whether the loose loader serves
+  new paths that aren't in the paks (coop/...).
+- Lobby test 4: Mia eyes present but black; Mia (tape) missing chest + left hand; Zoe feet in the ground (lift 0.04 added); Joe T-pose (DLC-only animations) and no hands (pl9010/pl9020 load empty: no materials) - labelled 'no animation yet', hands dropped. Root cause of hidden pieces: dressed pieces kept Ethan's parts mask (parts_mode assignment in build_ethan hits a global, apply_mask reads the local 'source'); dressed pieces now get mask_n=0.
+- Lobby test 5: mod's Mia layout = pl2001 clothes (pl2000_cloth/jacket), pl2002 head (em2050 materials incl. Eye_Blend, Skin_Mia), pl2020 hair (em2070), + pl2023 (now loaded as ShadowExtra, full only). Eyes black: Eye_Blend Metallic 1 -> 0 live changed nothing; parked. Joe: plain game files animate (seen after a reset dressed him before fullModels was read), the mod's Joe T-poses -> Joe out of MODDED. Lobby redresses once fullModels is known.
+- Mia (tape) left-chest gap persists with the mod's "Mia Head Model Placeholder RT" 1.2 too: all pieces loaded,
+  no parts off -> a hole in the mod's model. Parked as good enough, with the black eyes.
+- New from the 2026-11-02 session (reported 11-03): objects a player pushes with their body (chairs) don't move
+  for the other player. Physics props aren't synced; idea: the nearer player's game sends positions of
+  moved rigid bodies near it, like enemy snapshots.
+
+## Action animations (2026-11-03)
+- coop_animrec recording (block x few, door, phone in the Ch3 save room): the player object Pl0000's Motion
+  plays layer0 pl0000_Idle / pl0000_Move (blend trees) + TurnL/R; layers 1 AND 2 Hands_Guard_Start 2305 /
+  Loop 2300 / End 2306 (also Look-Genom 2700/2701 = codex); layer4 Hands_TouchDoor_End 9012,
+  TouchWall_Start 9000 / End 9002; layer5 CamAdd crouch (bank 1); layer1 bank 1 CamAdd_Impact. The phone
+  pickup played nothing on Pl0000 (event actor). Weapons not recorded yet.
+- Built: sender packs the first active bank-0 clip >= 1000 on layers 4,1,2 into the packet's chapter field
+  (chapter + 256 * motion id); receiver splits it (peer_chapter % 256, peer_action). ghost_action() puts it on
+  the ghost's layer 1 (setLayerCount 2 + TreeLayer), JointMaskID/BlendMode copied from our own player's layer
+  (4 for ids >= 9000 else 1), BlendRate 0 when nothing plays. net.test_action overrides for probes.
+  Packet change: both players need this version (old ones read chapter + 256*id as the chapter).
+- TESTED 2026-11-03 (bot, test_action=2300): ghost raised its arms in the block pose, and dropped them on release; sender verified: coopnet_out carried 5+256*2305 / 5+256*2306 while the owner blocked. Not yet seen between two players.
+- 2026-11-03: inventory addItem() from a probe left MenuManager _PlayerOperatableFlag/_CameraOperatableFlag false id 'InventoryMenu' (no menu open): player couldn't move. Cleared with flag:setFlag('InventoryMenu', true). Knife/G17 addItem returned LimitOver = already owned.

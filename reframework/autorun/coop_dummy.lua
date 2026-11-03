@@ -4,17 +4,30 @@
 -- player's own Shadow* meshes, animates it from the network samples (walk/jog/crouch,
 -- head look, footsteps), rebuilds it after loads, and owns the RE7 Co-op window, the
 -- on-screen status, connecting, the chapter switcher and the testing tools.
--- Log: <game>/reframework/data/coop_dummy_log.txt (plus one copy per script load).
+-- Log: <game>/reframework/data/coop_dummy_log.txt; the previous script load's log is kept
+-- as coop_dummy_log_prev.txt, so a Reset scripts doesn't wipe the last test.
 
--- One log file per script load, so a Reset scripts doesn't wipe the last test.
-local lines = {}
-local LOG_FILE = "coop_dummy_log_" .. os.date("%H%M%S") .. ".txt"
+-- Lines are collected and written once a second (writing the whole log on every line,
+-- twice, cost a 300 KB+ write per line late in a session).
+local lines, log_dirty, log_t = {}, false, 0
+do
+    local prev = fs.read("coop_dummy_log.txt")
+    if prev and prev ~= "" then fs.write("coop_dummy_log_prev.txt", prev) end
+end
 local function log(s)
     lines[#lines + 1] = os.date("%H:%M:%S ") .. tostring(s)
-    local text = table.concat(lines, "\n")
-    fs.write(LOG_FILE, text)
-    fs.write("coop_dummy_log.txt", text)
+    if #lines > 6000 then
+        local keep = {}
+        for i = #lines - 3999, #lines do keep[#keep + 1] = lines[i] end
+        lines = keep
+    end
+    log_dirty = true
 end
+re.on_frame(function()
+    if not log_dirty or os.clock() - log_t < 1 then return end
+    log_t, log_dirty = os.clock(), false
+    fs.write("coop_dummy_log.txt", table.concat(lines, "\n") .. "\n")
+end)
 
 local function safe(f, ...)
     local ok, r = pcall(f, ...)
@@ -130,6 +143,7 @@ local parts_frames = 0
 -- samples stand in for a remote player's packets until networking exists.
 local DELAY, KEEP = 3.0, 10.0
 TURN_TAU = 0.1          -- s; body facing eases toward the sender's (smaller = snappier)
+LOOK_TAU = 0.12         -- s; head look eases toward the friend's (smooths mouse flicks)
 BLEND_DIR = 12          -- frames to blend between directions of the same stance
 BLEND_STANCE = 16       -- frames to blend walk/jog/crouch/stand changes
 MIN_HOLD = 0.3          -- s a moving clip plays before a direction change
@@ -219,6 +233,11 @@ function local_cutscene()
     local list = gem and safe(gem.get_field, gem, "RunningEventControllers")
     local n = list and tonumber(safe(list.call, list, "get_Count") or 0) or 0
     cutscene_events = n
+    -- Some events run in the background while you play (c01e00_01 after the basement
+    -- ladder, 2026-11-02): it hid the friend for good. Only count an event the menus
+    -- treat as playing.
+    local mm = n > 0 and sdk.get_managed_singleton("app.MenuManager")
+    if mm and safe(mm.call, mm, "isPlayingEvent") == false then return false end
     return n > 0
 end
 
@@ -354,6 +373,41 @@ local net = {
 function coop_net_state() return net end
 function coop_ghost() return dummy end
 
+-- Actions (2026-11-03 recording): the player's body plays its walk on layer 0 and actions
+-- on top: blocking (Hands_Guard_*) on layers 1 and 2 with an upper-body joint mask, door
+-- and wall touches on layer 4. The action clip (bank 0 motion ID) rides in the packet's
+-- chapter field (chapter + 256 * motion ID); the friend's Ethan plays it on its own layer 1
+-- with the same mask and blend mode. Layer-0 walking is left to the ghost's own picker.
+ACTION_LAYERS = { 4, 1, 2 }
+local act = { motion = nil, motion_go = nil }
+function local_action_clip(player)
+    if act.motion_go ~= player then
+        act.motion_go = player
+        act.motion = safe(player.call, player, "getComponent(System.Type)", sdk.typeof("via.motion.Motion"))
+    end
+    local m = act.motion
+    if m == nil then return 0 end
+    for _, li in ipairs(ACTION_LAYERS) do
+        local L = safe(m.call, m, "getLayer", li)
+        if L then
+            local bank = safe(L.call, L, "get_MotionBankID")
+            local id = tonumber(safe(L.call, L, "get_MotionID") or 0xFFFFFFFF) or 0xFFFFFFFF
+            if bank == 0 and id >= 1000 and id < 65536 then
+                if act.mask == nil then
+                    -- Remember this layer's mask and blend mode for the ghost's action layer.
+                    act.mask = safe(L.call, L, "get_JointMaskID")
+                    act.blend_mode = safe(L.call, L, "get_BlendMode")
+                end
+                act.mask_by_id = act.mask_by_id or {}
+                act.mask_by_id[id] = act.mask_by_id[id] or { mask = safe(L.call, L, "get_JointMaskID"),
+                    mode = safe(L.call, L, "get_BlendMode") }
+                return id
+            end
+        end
+    end
+    return 0
+end
+
 local function net_io()
     if not net.enabled then return end
     local now = os.clock()
@@ -369,7 +423,8 @@ local function net_io()
         -- animId carries our chapter; animFrame echoes the newest sender time we've
         -- received from the peer (mod 1000 s), so they can measure the round trip.
         fs.write("coopnet_out.txt", string.format("%d %.4f %.5f %.5f %.5f %.6f %.6f %.6f %.6f %d %d %.4f %.4f %.4f\n",
-            net.seq, now, p.x, p.y, p.z, q.x, q.y, q.z, q.w, local_stance_flags(player), local_chapter(),
+            net.seq, now, p.x, p.y, p.z, q.x, q.y, q.z, q.w, local_stance_flags(player),
+            local_chapter() + 256 * (local_action_clip(player) or 0),
             (net.peer_t or 0) % 1000, ly, lp))
     end
 
@@ -396,7 +451,8 @@ local function net_io()
                         pos = Vector3f.new(v[3], v[4], v[5]), rot = Quaternion.new(v[9], v[6], v[7], v[8]),
                         flags = math.floor(v[10]), look_yaw = v[13], look_pitch = v[14] }
                     net.peer_t = t                         -- echoed back to the peer
-                    net.peer_chapter = math.floor(v[11])
+                    net.peer_chapter = math.floor(v[11]) % 256
+                    net.peer_action = math.floor(math.floor(v[11]) / 256)
                     -- Round trip: the peer echoes our own send time (mod 1000 s).
                     if v[12] and v[12] > 0 then
                         local rtt = (now % 1000) - v[12]
@@ -659,6 +715,7 @@ local function poll_clips()
         -- Stand_Loop and Crouch_Loop (20:49) jam the layer; crouching still is the
         -- crouch-walk clip held on one frame instead. Retire them under any prefix.
         anim.bad = anim.bad or {}
+        anim.idle_hold = false   -- a fallback from an earlier ghost/chapter must not carry over
         for _, c in ipairs(anim.clips) do
             local suffix = c.name:gsub("^pl%d+_", "")
             if suffix == "Hands_Stand_Loop" or suffix == "Hands_Crouch_Loop" then anim.bad[c.name] = true end
@@ -701,6 +758,7 @@ function rebuild_layer()
     safe(tl.add_ref, tl)
     safe(tl.call, tl, ".ctor")
     safe(anim.motion.call, anim.motion, "setLayerCount", 1)
+    anim.action = nil   -- the action layer went with it; ghost_action re-adds it
     local _, err = safe(anim.motion.call, anim.motion, "setLayer", 0, tl)
     log("rebuild_layer: new TreeLayer on slot 0" .. (err and (" ERR " .. tostring(err)) or ""))
 end
@@ -869,6 +927,53 @@ end
 
 -- Auto: pick walk or idle from how fast the ghost moved over the last 0.25 s.
 local last_auto = { t = 0, pos = nil }
+
+-- The friend's action clip (blocking, touching a door) on the ghost's layer 1, over the
+-- walk on layer 0. Mask and blend mode come from our own player's layer that plays such
+-- clips (masks are shared: both use the pl0000 joint map). Nothing playing = layer 1 off.
+local function own_layer_setup(li)
+    local player = get_player()
+    local m = player and safe(player.call, player, "getComponent(System.Type)", sdk.typeof("via.motion.Motion"))
+    local L = m and safe(m.call, m, "getLayer", li)
+    if L == nil then return nil, nil end
+    return safe(L.call, L, "get_JointMaskID"), safe(L.call, L, "get_BlendMode")
+end
+
+function ghost_action()
+    if not anim.ready or anim.motion == nil or anim.change == nil then return end
+    local want = net.test_action or net.peer_action or 0   -- test_action: set from a probe, bot tests
+    if want == (anim.action or 0) then return end
+    local m = anim.motion
+    if (tonumber(safe(m.call, m, "getLayerCount") or 0) or 0) < 2 then
+        safe(m.call, m, "setLayerCount", 2)
+        if safe(m.call, m, "getLayer", 1) == nil then
+            local tl = safe(sdk.create_instance, "via.motion.TreeLayer")
+            if tl then safe(tl.add_ref, tl) safe(tl.call, tl, ".ctor") safe(m.call, m, "setLayer", 1, tl) end
+        end
+    end
+    local L = safe(m.call, m, "getLayer", 1)
+    if L == nil then return end
+    anim.action = want
+    if want == 0 then
+        safe(L.call, L, "set_BlendRate", 0.0)
+        return
+    end
+    -- Touches (9000s) play on the player's layer 4, everything else on layer 1.
+    local mask, mode = own_layer_setup(want >= 9000 and 4 or 1)
+    if mask then safe(L.call, L, "set_JointMaskID", mask) end
+    if mode then safe(L.call, L, "set_BlendMode", mode) end
+    safe(L.call, L, "set_Resource", nil)
+    local n = #(anim.change:get_param_types() or {})
+    if n == 6 then
+        pcall(anim.change.call, anim.change, L, 0, want, 0.0, 6.0, 2, 0)
+    else
+        pcall(anim.change.call, anim.change, L, 0, want, 0.0, 6.0)
+    end
+    safe(L.call, L, "set_Speed", 1.0)
+    safe(L.call, L, "set_BlendRate", 1.0)
+    log(string.format("action: friend plays motion %d (mask %s, mode %s)", want, tostring(mask), tostring(mode)))
+end
+
 local function auto_animate(anchor, anchor_rot)
     if not anim.auto or anchor == nil then return end
     local now = os.clock()
@@ -942,13 +1047,14 @@ local function auto_animate(anchor, anchor_rot)
             anim.last_stance = anim.stance
         end
     end
-    -- Last-resort idle is the walk clip held still.
-    if (want == anim.idle and anim.idle_hold) or (not anim.moving and hold_still) then
+    -- Last-resort idle is the walk clip held still (only while standing: walking forward
+    -- plays that same clip and must keep its stride, 2026-11-02 slide).
+    if not anim.moving and ((want == anim.idle and anim.idle_hold) or hold_still) then
         local layer = safe(anim.motion.call, anim.motion, "getLayer", 0)
         if layer then safe(layer.call, layer, "set_Speed", 0.0) end
     end
     -- Match the cycle to how fast the ghost actually moves (no foot sliding).
-    if want ~= anim.idle and want ~= still_clip and anim.playing == want then
+    if anim.moving and anim.playing == want then
         local layer = safe(anim.motion.call, anim.motion, "getLayer", 0)
         local target = math.max(0.5, math.min(2.0, anim.speed / ref))
         -- Ease the stride rate too; jumping it every 0.1 s looked choppy.
@@ -1001,6 +1107,7 @@ function assemble_from(c)
     -- ...and the old ghost's Motion: until setup_animation binds the new one, head look
     -- and the watchdog must not touch it (that was the remaining Invoke error, 21:04).
     anim.motion, anim.ready, anim.verify_at, anim.last_verify_frame = nil, false, nil, nil
+    anim.action = nil
 
     local list = meshes_under(root)
     log("assemble: " .. #list .. " meshes under root")
@@ -1022,6 +1129,7 @@ function assemble_from(c)
             log("assemble: player '" .. tostring(root:call("get_Name")) .. "' has no Shadow body; no ghost yet")
             return
         end
+        if dress_as_friend_choice then shadow = dress_as_friend_choice(shadow) end
         list = shadow
         log("assemble: " .. tostring(root:call("get_Name")) .. " uses " .. #shadow .. " Shadow* pieces")
         ghost_built_t = os.clock()
@@ -1141,7 +1249,17 @@ re.on_frame(function()
         if a and b then
             anim.vel = { x = (a.pos.x - b.pos.x) / 0.12, z = (a.pos.z - b.pos.z) / 0.12 }
         end
-        if s and s.look_yaw then look.yaw, look.pitch = s.look_yaw, s.look_pitch end
+        -- Ease the head toward the friend's look (time constant LOOK_TAU): their mouse
+        -- flicks and the one-sample spikes when their body lags their camera in a fast
+        -- turn made the head twitch.
+        if s and s.look_yaw then
+            local now_l = os.clock()
+            local dt_l = math.min(0.1, now_l - (look.t or now_l))
+            look.t = now_l
+            local k = (look.yaw == nil) and 1 or (1 - math.exp(-dt_l / LOOK_TAU))
+            look.yaw = (look.yaw or s.look_yaw) + (s.look_yaw - (look.yaw or s.look_yaw)) * k
+            look.pitch = (look.pitch or s.look_pitch) + (s.look_pitch - (look.pitch or s.look_pitch)) * k
+        end
         anim.flags = s and s.flags or nil
         if s then
             pcall(dtr.call, dtr, "set_Position", s.pos)
@@ -1171,6 +1289,10 @@ re.on_frame(function()
     pcall(poll_clips)
     pcall(verify_playback)
     local aok, aerr = pcall(auto_animate, anchor, anchor_rot)
+    if aok then
+        local cok, cerr = pcall(ghost_action)
+        if not cok and not anim.action_err then anim.action_err = true log("action ERR " .. tostring(cerr)) end
+    end
     if not aok and not anim.auto_err then anim.auto_err = true log("auto ERR " .. tostring(aerr)) end
 
     local diag_player = get_player()   -- nil while a chapter loads
@@ -1245,7 +1367,9 @@ re.on_frame(function()
                 local aq = anchor_rot and { x = anchor_rot.x, y = anchor_rot.y, z = anchor_rot.z, w = anchor_rot.w }
                     or { x = 0, y = 0, z = 0, w = 1 }
                 local o = part.off and qrot(aq, part.off) or { x = 0, y = 0, z = 0 }
-                ptr:call("set_Position", Vector3f.new(anchor.x + o.x, anchor.y + o.y, anchor.z + o.z))
+                -- Per-character height fix (Zoe's model stands lower than Ethan's).
+                local lift = lobby and character_by_key(lobby.friend_look).lift or 0
+                ptr:call("set_Position", Vector3f.new(anchor.x + o.x, anchor.y + o.y + lift, anchor.z + o.z))
                 local r = part.lrot and qmul(aq, part.lrot) or aq
                 ptr:call("set_Rotation", Quaternion.new(r.w, r.x, r.y, r.z))
                 if not part.rot_checked then
@@ -1498,6 +1622,10 @@ local function draw_connect_body()
     end
     imgui.text("Last save backup: " .. tostring(kv.lastBackup or "-") .. " (" .. tostring(kv.backups or 0) .. " kept)")
     if imgui.button("Back up saves now") then send_command("backup manual") end
+    imgui.same_line()
+    -- CoopNet copies the co-op logs (SteamIDs, names and user name blanked) into a zip on
+    -- the desktop; the result shows on the "Last change" line.
+    if imgui.button("Make a bug report (zip on your desktop)") then send_command("report") end
 
     if imgui.separator then imgui.separator() end
     local hchanged, hv = imgui.checkbox("On-screen status", settings.hud)
@@ -1509,7 +1637,7 @@ local function draw_connect_body()
     local fchanged, fv = imgui.checkbox("Friend's footsteps", settings.footsteps ~= false)
     if fchanged then settings.footsteps = fv save_settings() end
     -- Story cutscenes and progress follow whichever player reaches them first.
-    local sc, sv = imgui.checkbox("Share story (cutscenes and progress)", settings.share_story ~= false)
+    local sc, sv = imgui.checkbox("Share story (cutscenes and progress, experimental)", settings.share_story == true)
     if sc then settings.share_story = sv save_settings() end
     if imgui.button("Teleport to my friend") then teleport_to_friend() end
 end
@@ -1610,6 +1738,256 @@ local function draw_chapter_switcher()
     imgui.text("Current chapter: " .. tostring(local_chapter()) .. "   Last: " .. chapters.last)
 end
 
+-- Lobby: who's here and how each player looks to the other -------------------------
+-- Every playable character in RE7 has the same set of pieces RE7 draws only for the
+-- player's shadow, on Ethan's skeleton (so Ethan's animations fit them all):
+--   ShadowBody plXX01, ShadowLowerBody plXX02, ShadowHead plXX50, ShadowHandL/R.
+-- In the plain game those pieces are incomplete (the heads have no real face: Mia's
+-- came out black, 2026-11-02). The Nexus mod "Third Person Full Model Placeholders"
+-- (RE7 mod 86, loose files) replaces them with complete models under the same paths,
+-- so with it installed the same choice shows a full character; CoopNet reports it as
+-- fullModels=1. Its file list gave the DLC paths: Chris ch8 pl1000, Joe ch9 pl9000,
+-- Zoe pl3400, Clancy (DLC) pl3100.
+-- "Default" is whoever the friend is playing right now. Your pick goes to the friend
+-- as "look <key>" and is re-sent every 15 s.
+-- Pieces are keyed by the Shadow* owner they replace; mdf defaults to the mesh path.
+local P = "Character/Player/"
+CHARACTERS = {
+    { key = "default", name = "Default (who you're playing)" },
+    { key = "ethan", name = "Ethan", pieces = {
+        ShadowBody = { mesh = P .. "pl0000/pl0001/pl0001" },
+        ShadowLowerBody = { mesh = P .. "pl0000/pl0002/pl0002" },
+        ShadowHead = { mesh = P .. "pl0000/pl0050/pl0050" },
+        ShadowHandL = { mesh = P .. "pl0000/pl0000/pl0021" },
+        ShadowHandR = { mesh = P .. "pl0000/pl0000/pl0010" } } },
+    -- pl0051 is the head RE7 uses in a few events (Pl0000Head); may show his face.
+    { key = "ethan_face", name = "Ethan (event head)", pieces = {
+        ShadowBody = { mesh = P .. "pl0000/pl0001/pl0001" },
+        ShadowLowerBody = { mesh = P .. "pl0000/pl0002/pl0002" },
+        ShadowHead = { mesh = P .. "pl0000/pl0051/pl0051" },
+        ShadowHandL = { mesh = P .. "pl0000/pl0000/pl0021" },
+        ShadowHandR = { mesh = P .. "pl0000/pl0000/pl0010" } } },
+    { key = "mia", name = "Mia", pieces = {
+        ShadowBody = { mesh = P .. "pl2000/pl2001/pl2001" },
+        ShadowLowerBody = { mesh = P .. "pl2000/pl2002/pl2002" },
+        ShadowHead = { mesh = P .. "pl2000/pl2050/pl2050" },
+        ShadowHandL = { mesh = P .. "pl2000/pl2000/pl2020", mdf = P .. "pl2000/pl2000/pl2020_light" },
+        ShadowHandR = { mesh = P .. "pl2000/pl2000/pl2010", mdf = P .. "pl2000/pl2000/pl2010_light" },
+        -- The mod lays Mia out its own way (pl2001 clothes, pl2002 head, pl2020 hair) and
+        -- ships pl2023 too; without it her chest and left hand were missing.
+        ShadowExtra = { mesh = P .. "pl2000/pl2023/pl2023", full_only = true } } },
+    { key = "mia_ship", name = "Mia (ship)", pieces = {
+        ShadowBody = { mesh = P .. "pl2100/pl2101/pl2101" },
+        ShadowLowerBody = { mesh = P .. "pl2100/pl2102/pl2102" },
+        ShadowHead = { mesh = P .. "pl2100/pl2150/pl2150" },
+        ShadowHandL = { mesh = P .. "pl2100/pl2100/pl2120" },
+        ShadowHandR = { mesh = P .. "pl2100/pl2100/pl2110" } } },
+    { key = "clancy", name = "Clancy", pieces = {
+        ShadowBody = { mesh = P .. "pl3000/pl3001/pl3001" },
+        ShadowLowerBody = { mesh = P .. "pl3000/pl3002/pl3002" },
+        ShadowHead = { mesh = P .. "pl3000/pl3050/pl3050" },
+        ShadowHandL = { mesh = P .. "pl3000/pl3000/pl3020", mdf = P .. "pl3000/pl3000/em3020" },
+        ShadowHandR = { mesh = P .. "pl3000/pl3000/pl3010", mdf = P .. "pl3000/pl3000/em3010" } } },
+    -- Below: paths from the full-model mod's file list, not yet seen loaded in this game.
+    { key = "zoe", name = "Zoe", lift = 0.04, pieces = {
+        ShadowBody = { mesh = P .. "pl3400/pl3401/pl3401" },
+        ShadowLowerBody = { mesh = P .. "pl3400/pl3402/pl3402" },
+        ShadowHead = { mesh = P .. "pl3400/pl3450/pl3450" },
+        ShadowHandL = { mesh = P .. "pl3400/pl3400/pl3420" },
+        ShadowHandR = { mesh = P .. "pl3400/pl3400/pl3410" } } },
+    -- Chris's and Joe's hands and Chris's head follow the plXX10 / plXX20 / plXX50 pattern
+    -- of the others; not in the mod's list, so unconfirmed.
+    { key = "chris", name = "Chris (DLC)", pieces = {
+        ShadowBody = { mesh = "ch8/" .. P .. "pl1000/pl1001/pl1001" },
+        ShadowLowerBody = { mesh = "ch8/" .. P .. "pl1000/pl1002/pl1002" },
+        ShadowHead = { mesh = "ch8/" .. P .. "pl1000/pl1050/pl1050" },
+        ShadowHandL = { mesh = "ch8/" .. P .. "pl1000/pl1000/pl1020" },
+        ShadowHandR = { mesh = "ch8/" .. P .. "pl1000/pl1000/pl1010" } } },
+    -- Joe: the game's own files animate; the mod's stood in a T-pose, so he's left out of
+    -- MODDED. No hands yet (pl9010/pl9020 load empty).
+    { key = "joe", name = "Joe (DLC, no hands yet)", pieces = {
+        ShadowBody = { mesh = "ch9/" .. P .. "pl9000/pl9001/pl9001" },
+        ShadowLowerBody = { mesh = "ch9/" .. P .. "pl9000/pl9002/pl9002" },
+        ShadowHead = { mesh = "ch9/" .. P .. "pl9000/pl9050/pl9050" } } },
+}
+lobby = { friend_look = "default", sent_t = -100, sent_look = nil }
+
+-- Files the full-model mod provides. "Use full models.cmd" moves them to natives\stm\coop\
+-- (so the player's own first-person body stays the game's: with the mod's, the camera sat
+-- inside Ethan's head), and its bodies already include the head (the game's shadow head
+-- on top showed black on Mia and off-place on Zoe).
+local MODDED = {}
+for _, p in ipairs({ "pl0000/pl0001/pl0001", "pl0000/pl0002/pl0002",
+        "pl2000/pl2001/pl2001", "pl2000/pl2002/pl2002", "pl2000/pl2000/pl2020",
+        "pl2100/pl2101/pl2101", "pl2100/pl2102/pl2102", "pl2100/pl2100/pl2110", "pl2100/pl2100/pl2120",
+        "pl3000/pl3001/pl3001", "pl3000/pl3002/pl3002", "pl3100/pl3101/pl3101", "pl3100/pl3102/pl3102",
+        "pl3400/pl3401/pl3401", "pl3400/pl3402/pl3402", "pl3400/pl3400/pl3410", "pl3400/pl3400/pl3420" }) do
+    MODDED[P .. p] = true
+end
+MODDED["ch8/" .. P .. "pl1000/pl1001/pl1001"], MODDED["ch8/" .. P .. "pl1000/pl1002/pl1002"] = true, true
+MODDED[P .. "pl2000/pl2023/pl2023"] = true
+
+local function full_models() return net.kv ~= nil and net.kv.fullModels == "1" end
+
+function character_by_key(key)
+    for _, c in ipairs(CHARACTERS) do if c.key == key then return c end end
+    return CHARACTERS[1]
+end
+
+local function load_holders(mesh, mdf)
+    local r = sdk.create_resource("via.render.MeshResource", mesh .. ".mesh")
+    r:add_ref()
+    local h = r:create_holder("via.render.MeshResourceHolder")
+    h:add_ref()
+    local mr = sdk.create_resource("via.render.MeshMaterialResource", (mdf or mesh) .. ".mdf2")
+    mr:add_ref()
+    local mh = mr:create_holder("via.render.MeshMaterialResourceHolder")
+    mh:add_ref()
+    return h, mh
+end
+
+-- Called by assemble_from with the local player's Shadow* pieces: dress them as the
+-- friend's chosen character. Each piece the character has replaces the local piece of
+-- the same name (a piece the local player lacks is added, borrowing the body's
+-- skeleton like the head does); local pieces the character doesn't have are dropped.
+function dress_as_friend_choice(shadow)
+    local c = character_by_key(lobby.friend_look)
+    if c.pieces == nil then lobby.dressed_full = nil return shadow end
+    local by_owner, template = {}, nil
+    for _, e in ipairs(shadow) do
+        by_owner[e.owner] = e
+        if not e.is_root and template == nil then template = e end
+    end
+    if by_owner.ShadowBody == nil then log("lobby: no ShadowBody to dress; keeping the default") return shadow end
+    local out = {}
+    local full = full_models() and c.pieces.ShadowBody and MODDED[c.pieces.ShadowBody.mesh]
+    for _, owner in ipairs({ "ShadowBody", "ShadowLowerBody", "ShadowHead", "ShadowHandL", "ShadowHandR", "ShadowExtra" }) do
+        local pc = c.pieces[owner]
+        if full and owner == "ShadowHead" then pc = nil end   -- the full body has its head
+        if pc and pc.full_only and not full then pc = nil end
+        if pc and full_models() and MODDED[pc.mesh] then
+            pc = { mesh = "coop/" .. pc.mesh }                 -- the mod's file, with its own material
+        end
+        if pc then
+            local e = by_owner[owner]
+            if e == nil then
+                local t = template or by_owner.ShadowBody
+                e = { owner = owner, go = t.go, mask = t.mask, mask_n = t.mask_n, is_root = false,
+                    same_joints = true, parent_joint = nil }
+            end
+            local ok, h, mh = pcall(load_holders, pc.mesh, pc.mdf)
+            if ok and h and mh then
+                e.holder, e.mholder, e.path = h, mh, pc.mesh .. ".mesh"
+                e.src = nil   -- the material variables to copy belong to the local character
+                -- ...and so does the parts on/off pattern: Ethan's (parts 1, 10, 11 off) hid
+                -- Mia's eyes and chest and Zoe's feet. A dressed piece shows all its parts.
+                e.mask, e.mask_n = {}, 0
+                out[#out + 1] = e
+            else
+                log("lobby: couldn't load " .. pc.mesh .. ": " .. tostring(h))
+            end
+        end
+    end
+    if #out == 0 or out[1].owner ~= "ShadowBody" then
+        log("lobby: " .. c.name .. " has no body that loads; keeping the default")
+        return shadow
+    end
+    lobby.dressed_full = full_models()
+    log(string.format("lobby: friend dressed as %s (%d pieces, full-model mod %s)", c.name, #out,
+        (net.kv and net.kv.fullModels == "1") and "installed" or "not installed"))
+    return out
+end
+
+local function send_look()
+    if coop_send_event == nil then return end
+    lobby.sent_look = settings.look or "default"
+    lobby.sent_t = os.clock()
+    coop_send_event("look " .. lobby.sent_look)
+end
+
+-- Incoming "look" (coop_enemies.lua passes every event here first).
+function coop_lobby_on_event(text)
+    local key = text:match("^look (%S+)")
+    if key == nil then return false end
+    if key ~= lobby.friend_look then
+        lobby.friend_look = key
+        log("lobby: friend picked " .. character_by_key(key).name)
+        if #parts > 0 then pcall(build_ethan) end
+    end
+    return true
+end
+
+re.on_frame(function()
+    local kv = net.kv or {}
+    -- Right after a script reset the status isn't read yet, so a ghost dressed then used the
+    -- plain files: redress once we know whether the full models are installed.
+    if kv.fullModels ~= nil and lobby.dressed_full ~= nil and lobby.dressed_full ~= full_models()
+            and #parts > 0 and os.clock() - (lobby.redress_t or -100) > 5 then
+        lobby.redress_t = os.clock()
+        log("lobby: full-model state now known; dressing again")
+        pcall(build_ethan)
+    end
+    if kv.mode ~= "steam" and kv.mode ~= "bot" then return end
+    local last = net.history[#net.history]
+    if last == nil or os.clock() - last.t > 2 then return end
+    if lobby.sent_look ~= (settings.look or "default") or os.clock() - lobby.sent_t > 15 then pcall(send_look) end
+end)
+
+local function draw_lobby()
+    local kv = net.kv or {}
+    local last = net.history[#net.history]
+    local fresh = last ~= nil and (os.clock() - last.t) < (NET_TIMEOUT or 2)
+    local me = (kv.steamName and kv.steamName ~= "") and kv.steamName or "You"
+    local friend = (kv.peerName and kv.peerName ~= "") and kv.peerName or "your friend"
+    imgui.text("Player 1: " .. me .. " (you), chapter " .. chapter_name(local_chapter()))
+    local names, idx = {}, 1
+    for i, c in ipairs(CHARACTERS) do
+        names[#names + 1] = c.name
+        if c.key == (settings.look or "default") then idx = i end
+    end
+    if kv.fullModels == "1" then
+        imgui.text("Full character models: installed (Third Person Full Model Placeholders)")
+    elseif kv.fullModels == "off" then
+        imgui.text("Full character models: copied in, but REFramework's Loose File Loader is off.")
+        imgui.text("  Close the game and double-click \"Use full models.cmd\" (in the coop-re7 download).")
+    elseif kv.fullModels == "move" then
+        imgui.text("Full character models: copied in but not set up (your own view may show the inside")
+        imgui.text("  of the head). Close the game and double-click \"Use full models.cmd\".")
+    else
+        imgui.text("Full character models: not installed. Without them characters other than Default")
+        imgui.text("  may lack a face. Both players can install the Nexus mod")
+        imgui.text("  \"Third Person Full Model Placeholders\" (RE7 mod 86) into their co-op folder.")
+    end
+    local changed, v = imgui.combo("You appear to your friend as", idx, names)
+    if changed and CHARACTERS[v] then
+        settings.look = CHARACTERS[v].key
+        save_settings()
+        pcall(send_look)
+    end
+    if kv.mode == "bot" then
+        imgui.text("Player 2: the test bot, appears as " .. character_by_key(lobby.friend_look).name)
+    elseif fresh then
+        imgui.text("Player 2: " .. friend .. ", chapter " .. chapter_name(net.peer_chapter) ..
+            ", appears as " .. character_by_key(lobby.friend_look).name)
+        if net.peer_chapter ~= local_chapter() then
+            imgui.text("  In another chapter: click Go to my friend's chapter (below) to join them.")
+        end
+    else
+        imgui.text("Player 2: nobody yet. Invite a friend under Connect, saving and display.")
+    end
+    if fresh and net.peer_chapter ~= local_chapter() and imgui.button("Go to my friend's chapter##lobby") then
+        pcall(join_friend)
+    end
+    -- Test the looks alone: dress the bot as any character.
+    if kv.mode == "bot" then
+        imgui.text("Dress the bot as:")
+        for _, c in ipairs(CHARACTERS) do
+            imgui.same_line()
+            if imgui.button(c.name .. "##botlook") then coop_lobby_on_event("look " .. c.key) end
+        end
+    end
+end
+
 -- Floating "RE7 Co-op" window (shown while the REFramework menu is open) ------------
 coop_window = { open = true }
 
@@ -1639,6 +2017,7 @@ local function draw_testing()
     local fc, fv = imgui.checkbox("Fast-forward every cutscene", settings.ff_cutscenes == true)
     if fc then settings.ff_cutscenes = fv save_settings() end
     if imgui.button("Reload last save") then request_reload() end
+    if reload_msg then imgui.same_line() imgui.text(reload_msg) end
     imgui.same_line()
     if reload.running then
         if imgui.button("Stop reload test") then reload.running = false end
@@ -1670,6 +2049,9 @@ local function draw_testing()
             if imgui.button("Bot: unlock nearest locked door") then enemy_test_msg = world_sync_bot("unlock") end
             imgui.same_line()
             if imgui.button("Bot: take nearest supply") then enemy_test_msg = world_sync_bot("took") end
+            if imgui.button("Bot: smash nearest box") then enemy_test_msg = world_sync_bot("break") end
+            imgui.same_line()
+            if imgui.button("Bot: open/shut nearest drawer") then enemy_test_msg = world_sync_bot("drawer") end
         end
         if enemy_move_status then
             imgui.text(enemy_move_status())
@@ -1733,6 +2115,7 @@ re.on_draw_ui(function()
     if imgui.begin_window("RE7 Co-op", true, 0) then
         local ok, err = pcall(function()
             imgui.text("Status: " .. connection_text())
+            section("Lobby", draw_lobby)
             section("Connect, saving and display", draw_connect_body)
             section("Testing", draw_testing)
             imgui.text("Advanced and debug controls: Script Generated UI > coop_dummy (ghost body test)")
@@ -2002,7 +2385,16 @@ end)
 -- ~80 s before the real one appears (first run: rebuilds took 7-8 s, 90 s was too tight).
 reload = { running = false, round = 0, total = 10, every = 45, timeout = 180, stage = "idle", lines = {} }
 
+reload_msg = nil
 function request_reload()
+    -- After a chapter jump the load first tries an internal save the save guard blocks, and
+    -- the game sits on the loading icon for good (2026-11-02). Restarting is the way back.
+    if chapters and chapters.jump_t then
+        reload_msg = "Not after a chapter jump: restart the game and pick Continue instead"
+        log("reload: refused after a chapter jump")
+        return false
+    end
+    reload_msg = nil
     local sdm = sdk.get_managed_singleton("app.SaveDataManager")
     if sdm == nil then log("reload: no SaveDataManager") return false end
     local slot = tonumber(safe(sdm.get_field, sdm, "LoadSlotNo") or -1) or -1
@@ -2080,6 +2472,25 @@ re.on_frame(function()
     local playing = local_cutscene()
     if ff.on and not playing then fast_forward(false)
     elseif not ff.on and playing and settings and settings.ff_cutscenes then fast_forward(true) end
+end)
+
+-- A cutscene video cut short (story sharing, chapter jumps) can leave MenuManager's
+-- "full-screen movie playing" flag on, and with it on the pause menu never opens. Clear it
+-- once nothing has been playing and the player has been in control for 5 s.
+local movie_flag = { since = nil }
+re.on_frame(function()
+    local mm = sdk.get_managed_singleton("app.MenuManager")
+    local stuck = mm ~= nil and safe(mm.call, mm, "get_IsPlayInGameFullScreenMovie") == true
+        and not local_cutscene() and safe(mm.call, mm, "isCanInteract") == true
+    if not stuck then movie_flag.since = nil return end
+    local now = os.clock()
+    movie_flag.since = movie_flag.since or now
+    if now - movie_flag.since < 5.0 then return end
+    movie_flag.since = nil
+    if not pcall(mm.call, mm, "set_IsPlayInGameFullScreenMovie", false) then
+        pcall(mm.set_field, mm, "<IsPlayInGameFullScreenMovie>k__BackingField", false)
+    end
+    log("cleared a stuck full-screen movie flag (pause menu works again)")
 end)
 
 NET_TIMEOUT = 2.0
@@ -2296,7 +2707,7 @@ end
 re.on_application_entry("PrepareRendering", function()
     if not (look.enabled and look2.list and anim.motion) then return end
     local now = os.clock()
-    if now - (look2.diag_t or 0) < 2 then return end
+    if now - (look2.diag_t or 0) < 60 then return end   -- was 2 s: half of every log
     look2.diag_t = now
     pcall(function()
         local tr = anim.motion:call("get_GameObject"):call("get_Transform")

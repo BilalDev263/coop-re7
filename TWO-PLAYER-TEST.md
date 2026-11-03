@@ -64,12 +64,20 @@ Jack appears soon after dinner. Saving is off, so getting hurt costs nothing.
       come back to Player A within 3 seconds.
 - [ ] Player B starts again and reconnects. A sees B again.
 
+## 8. New in v0.12 (10 min)
+
+- [ ] **Lobby**: each player picks a character under *You appear to your friend as*. The other sees the change
+      within a few seconds.
+- [ ] **Blocking**: A blocks while B watches; B sees A's arms come up (also while walking).
+- [ ] **Doors**: A opens a door and lets it close; it opens and closes on B's screen too.
+- [ ] **Drawers and boxes**: A opens a drawer, then smashes a breakable box; both show on B's screen.
+- [ ] **Pausing**: A opens the pause menu near an enemy. B sees "Your friend paused the game" and the enemy keeps
+      moving for B.
+- [ ] **Enemy hand-off**: B walks clearly closer to an enemy A was nearer to. It keeps moving smoothly on both
+      screens (no flicker) and goes after B.
+- [ ] **Weapons**: A swings the knife and shoots. Does B see it? (Not expected yet; tell us either way.)
+
 ## Afterwards
 
-Each player sends these files from their co-op folder (`Documents\RE7-coop\reframework\data`):
-
-- `coop_dummy_log.txt`, `coop_enemies_log.txt`, `coop_world_log.txt`, `coop_story_log.txt`,
-  `coop_revive_log.txt`, `coopnet_status.txt`
-
-`coopnet_status.txt` contains your SteamID and Steam name; delete those two lines before posting it anywhere
-public.
+Each player clicks **Make a bug report** (RE7 Co-op window, *Connect, saving and display*) and sends the zip
+it puts on their desktop. SteamIDs and names are already blanked out.

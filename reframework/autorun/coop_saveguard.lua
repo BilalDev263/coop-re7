@@ -49,8 +49,11 @@ local function refresh()
     if now < next_read then return end
     next_read = now + 2
     local ok, s = pcall(json.load_file, "coop_settings.json")
-    local want = ok and type(s) == "table" and s.allow_saving == true
-    local want_mode = (not forced_strict and ok and type(s) == "table" and s.save_block_mode == "write") and "write" or "strict"
+    -- Caught mid-write (empty file, 33 times in the friend's 2026-11-02 log): keep what we
+    -- had instead of flipping saving off for 2 s.
+    if not ok or type(s) ~= "table" then return end
+    local want = s.allow_saving == true
+    local want_mode = (not forced_strict and s.save_block_mode == "write") and "write" or "strict"
     if want ~= allow or want_mode ~= mode then
         allow, mode = want, want_mode
         log_line(allow and "saving ALLOWED (backups by CoopNet)"

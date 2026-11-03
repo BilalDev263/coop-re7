@@ -9,20 +9,32 @@
 #  5. Creates "Start RE7 Co-op" (in the co-op folder and on your desktop).
 #
 # Run it with Install.cmd (double-click). Options for advanced use:
-#   -Destination <folder>   where the co-op copy goes (default: Documents\RE7-coop)
+#   -Destination <folder>   where the co-op copy goes (default: Documents\RE7-coop, or C:\RE7-coop
+#                           when Documents is synced by OneDrive)
 #   -GameSource <folder>    RE7 folder to copy from (default: found in Steam)
 #   -NoGameCopy             only (re)install the mod files into an existing co-op folder
-#   -BackupDir <folder>     where save backups go (default: Documents\RE7-coop-save-backups)
+#   -BackupDir <folder>     where save backups go (default: next to the co-op folder)
 
 param(
-    [string]$Destination = (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "RE7-coop"),
+    [string]$Destination = "",
     [string]$GameSource = "",
     [switch]$NoGameCopy,
-    [string]$BackupDir = (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "RE7-coop-save-backups"),
+    [string]$BackupDir = "",
     [switch]$NoShortcut
 )
 
 $ErrorActionPreference = "Stop"
+
+# OneDrive moves big files online-only (or never finishes uploading them), which leaves the
+# game copy incomplete: it starts, but the world renders black. Keep it out of OneDrive.
+$Base = [Environment]::GetFolderPath("MyDocuments")
+if ($Base -match "OneDrive") { $Base = $env:SystemDrive + "\" }
+if ($Destination -eq "") { $Destination = Join-Path $Base "RE7-coop" }
+if ($BackupDir -eq "") { $BackupDir = Join-Path $Base "RE7-coop-save-backups" }
+if ($Destination -match "OneDrive") {
+    Write-Host "FAILED: $Destination is inside OneDrive; pick a folder outside it with -Destination" -ForegroundColor Red
+    exit 1
+}
 $Kit = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Pinned, verified REFramework nightly (supports the current RT build of RE7).

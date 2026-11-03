@@ -5,9 +5,17 @@
 --   story <name> <chapter>       a story cutscene started (names like c03e01_00)
 --   prog <flow hash> <value> <chapter>   a story stage's progress number went up
 --   evend <event hash> <chapter> a story event was marked finished
--- Cutscenes start by name with GameEventManager.requestEvent (the other player is pulled
--- into the scene wherever they are). Each cutscene plays once per side; progress only
--- ever goes up. Events go through coop_enemies.lua's reliable channel.
+-- Cutscenes start by name with GameEventManager.requestEvent. Each cutscene plays once per
+-- side; progress only ever goes up. Events go through coop_enemies.lua's reliable channel.
+--
+-- Rules since the first real session (2026-11-02), which showed that pushing a player who
+-- is elsewhere breaks their game (a tape ended early, a chapter change stuck, a washed-out
+-- picture, the dinner chair skipping ahead):
+--   * a friend's cutscene is only played here when we are in the same chapter and within
+--     NEAR metres of them; otherwise we see it ourselves when we get there;
+--   * progress numbers and finished events are only copied while "in step": for
+--     IN_STEP seconds after we were pulled into a cutscene of theirs. Outside that each
+--     game keeps its own story.
 
 story_sync = {
     played = {},       -- cutscene name -> true (started on this side, by us or the friend)
@@ -37,13 +45,23 @@ local function mark_played(name, ch)
         save_played()
     end
 end
-local PENDING_FOR = 120   -- s to keep waiting for a cutscene's area to load here
+local PENDING_FOR = 10    -- s to keep waiting for a nearby friend's cutscene to load here
+local NEAR = 12           -- m: a friend's cutscene pulls us in only this close
+local IN_STEP = 30        -- s after a shared cutscene during which their progress is copied
 
+-- Lines are collected and appended once a second (was a full read + rewrite per line).
+local log_buf, log_t = {}, 0
 local function log(s)
+    log_buf[#log_buf + 1] = os.date("%H:%M:%S ") .. tostring(s)
+end
+re.on_frame(function()
+    if #log_buf == 0 or os.clock() - log_t < 1 then return end
+    log_t = os.clock()
     local f = fs.read("coop_story_log.txt") or ""
     if #f > 200000 then f = f:sub(-100000) end
-    fs.write("coop_story_log.txt", f .. os.date("%H:%M:%S ") .. s .. "\n")
-end
+    fs.write("coop_story_log.txt", f .. table.concat(log_buf, "\n") .. "\n")
+    log_buf = {}
+end)
 
 local function chapter()
     local gm = sdk.get_managed_singleton("app.GameManager")
@@ -56,8 +74,10 @@ local function note(msg)
     log(msg)
 end
 
--- "Share story" (RE7 Co-op window, on by default): off = neither send nor apply.
-local function sharing() return not (settings and settings.share_story == false) end
+-- "Share story" (RE7 Co-op window, off by default): off = neither send nor apply.
+-- Off unless ticked: in the first real session it pushed the player who was behind
+-- (tape ended early, washed-out picture, chapter change stuck), 2026-11-02.
+local function sharing() return settings ~= nil and settings.share_story == true end
 
 local function send(text)
     if not sharing() then return end
@@ -110,6 +130,19 @@ sdk.hook(gf:get_method("sendEventEnded(System.UInt32)"), function(args)
 end, function(r) return r end)
 
 -- Friend's side ----------------------------------------------------------------------
+-- Distance to the friend's Ethan (nil when there's none to measure).
+local function friend_distance()
+    local g = coop_ghost and coop_ghost()
+    local om = sdk.get_managed_singleton("app.ObjectManager")
+    local player = om and om:get_field("PlayerObj")
+    if g == nil or player == nil then return nil end
+    local ok, gp = pcall(function() return g:call("get_Transform"):call("get_Position") end)
+    if not ok or gp == nil then return nil end
+    local pp = player:call("get_Transform"):call("get_Position")
+    return math.sqrt((gp.x - pp.x) ^ 2 + (gp.y - pp.y) ^ 2 + (gp.z - pp.z) ^ 2)
+end
+
+local function in_step() return ss.in_step_until ~= nil and os.clock() < ss.in_step_until end
 local function setting_loaded(name)
     local em = event_mgr()
     local list = em and em:get_field("EventSettings")
@@ -127,12 +160,19 @@ local function play(name)
     local ok, err = pcall(em.call, em, "requestEvent(System.String, via.Transform, System.Boolean)",
         sdk.create_managed_string(name), nil, false)
     ss.applied = ss.applied + 1
+    if ok then ss.in_step_until = os.clock() + IN_STEP end
     note(ok and ("your friend's story: " .. name) or ("ERR playing " .. name .. ": " .. tostring(err)))
 end
 
 local function apply_story(name, ch)
     if ch ~= chapter() then log("story event in another chapter, ignored: " .. name) return end
     if ss.played_chapter == ch and ss.played[name] then log("already played here: " .. name) return end
+    local d = friend_distance()
+    if d == nil or d > NEAR then
+        note(string.format("your friend is watching a cutscene (%s m away: you'll see it when you get there)",
+            d and string.format("%.0f", d) or "?"))
+        return
+    end
     if setting_loaded(name) then play(name)
     else
         ss.pending[name] = { ch = ch, t = os.clock() }
@@ -142,6 +182,7 @@ end
 
 local function apply_prog(hash, value, ch)
     if ch ~= chapter() then return end
+    if not in_step() then log(string.format("progress %08x %d not copied (not in step)", hash, value)) return end
     local fm = flow_mgr()
     local var = fm and fm:call("getProgressiveNo(System.UInt32)", hash)
     local cur = var and var:call("get_S32") or 0
@@ -155,6 +196,7 @@ end
 
 local function apply_evend(hash, ch)
     if ch ~= chapter() then return end
+    if not in_step() then log(string.format("event %08x end not copied (not in step)", hash)) return end
     local fm = flow_mgr()
     if fm and not fm:call("isEventEnded(System.UInt32)", hash) then
         ss.applying[string.format("ee:%08x", hash)] = os.clock()
@@ -213,7 +255,8 @@ re.on_frame(function()
     if now - ss.pend_t < 1 then return end
     ss.pend_t = now
     for name, p in pairs(ss.pending) do
-        if now - p.t > PENDING_FOR or p.ch ~= chapter() then
+        local d = friend_distance()
+        if now - p.t > PENDING_FOR or p.ch ~= chapter() or d == nil or d > NEAR then
             ss.pending[name] = nil
             log("gave up waiting for " .. name)
         elseif not ss.played[name] and setting_loaded(name) then

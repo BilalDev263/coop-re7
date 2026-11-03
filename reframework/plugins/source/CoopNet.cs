@@ -550,7 +550,7 @@ public class CoopNet
         public float LookYaw, LookPitch;   // camera relative to body, radians
     }
 
-    const string Version = "0.11";
+    const string Version = "0.12";
     const int PacketSize = 64;
     static readonly byte[] Magic = { (byte)'R', (byte)'7', (byte)'C', (byte)'2' };
     const int KeepSamples = 32;
@@ -696,6 +696,12 @@ public class CoopNet
             s_lastCommand = "bot chapter " + ch;
             WriteStatus("running");
             return;   // not saved: the next launch starts with the bot beside us again
+        }
+        else if (parts.Length == 1 && parts[0] == "report")
+        {
+            s_lastCommand = MakeReport();
+            WriteStatus("running");
+            return;
         }
         else if (parts.Length == 2 && parts[0] == "backup")
         {
@@ -875,6 +881,82 @@ public class CoopNet
         catch (Exception e) { s_lastBackup = "FAILED: " + e.Message; API.LogWarning("[CoopNet] save backup failed: " + e); }
     }
 
+    // Bug report: the co-op logs and settings plus REFramework's log, copied to a folder on
+    // the desktop and zipped there. SteamIDs, Steam names (ours and the friend list's) and
+    // the Windows user name are blanked out, so the zip can be posted as it is.
+    static string MakeReport()
+    {
+        try
+        {
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", Inv);
+            var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            var dir = Path.Combine(desk, "coop-re7-report-" + stamp);
+            Directory.CreateDirectory(dir);
+            var names = new List<string>();
+            var status = Path.Combine(s_dataDir, "coopnet_status.txt");
+            foreach (var line in ReadShared(status).Split('\n'))
+                if (line.StartsWith("steamName=")) names.Add(line.Substring(10).Trim());
+            foreach (var line in ReadShared(Path.Combine(s_dataDir, "coopnet_friends.txt")).Split('\n'))
+            {
+                var cols = line.Split('\t');
+                if (cols.Length >= 4 && cols[3].Trim().Length > 0) names.Add(cols[3].Trim());
+            }
+            var user = Environment.UserName;
+            int n = 0;
+            var files = new List<string>();
+            foreach (var pat in new[] { "coop_*_log.txt", "coop_dummy_log_prev.txt", "coop_settings.json",
+                         "coop_story_played.json", "coopnet_status.txt", "coopnet_config.json" })
+                files.AddRange(Directory.GetFiles(s_dataDir, pat));
+            var fwLog = Path.GetFullPath(Path.Combine(s_dataDir, "..", "..", "re2_framework_log.txt"));
+            if (File.Exists(fwLog)) files.Add(fwLog);
+            foreach (var f in files)
+            {
+                var text = Scrub(ReadShared(f), names, user);
+                File.WriteAllText(Path.Combine(dir, Path.GetFileName(f)), text);
+                n++;
+            }
+            string q(string x) => x.Replace("'", "''");
+            var psi = new ProcessStartInfo("powershell",
+                $"-NoProfile -WindowStyle Hidden -Command \"Compress-Archive -Path '{q(dir)}\\*' -DestinationPath '{q(dir)}.zip' -Force; if ($?) {{ Remove-Item -Recurse -Force '{q(dir)}' }}\"")
+                { CreateNoWindow = true, UseShellExecute = false };
+            Process.Start(psi);
+            API.LogInfo("[CoopNet] bug report: " + dir + ".zip (" + n + " files)");
+            return "bug report on your desktop: coop-re7-report-" + stamp + ".zip (" + n + " files)";
+        }
+        catch (Exception e) { API.LogWarning("[CoopNet] bug report failed: " + e); return "bug report FAILED: " + e.Message; }
+    }
+
+    static string ReadShared(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var sr = new StreamReader(fs);
+            return sr.ReadToEnd();
+        }
+        catch (Exception) { return ""; }
+    }
+
+    static string Scrub(string text, List<string> names, string user)
+    {
+        var sb = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            // SteamID64s: 7656119 followed by 10 more digits.
+            if (i + 17 <= text.Length && string.CompareOrdinal(text, i, "7656119", 0, 7) == 0)
+            {
+                int j = i + 7;
+                while (j < i + 17 && char.IsDigit(text[j])) j++;
+                if (j == i + 17 && (j == text.Length || !char.IsDigit(text[j]))) { sb.Append("<steamid>"); i = j - 1; continue; }
+            }
+            sb.Append(text[i]);
+        }
+        var outText = sb.ToString();
+        foreach (var nm in names) if (nm.Length >= 2) outText = outText.Replace(nm, "<name>");
+        if (!string.IsNullOrEmpty(user) && user.Length >= 2) outText = outText.Replace(user, "<user>");
+        return outText;
+    }
+
     static void SaveConfig()
     {
         var path = Path.Combine(s_dataDir, "coopnet_config.json");
@@ -1042,8 +1124,35 @@ public class CoopNet
                 text += $"steamSelf={Steam.SelfId}\nsteamName={Steam.SelfName}\nrelayStatus={Steam.RelayStatus()}\n";
             if (IsSteam) text += $"lastSendResult={Steam.LastSendResult}\npeerName={Steam.PeerName()}\n";
             text += $"lastCommand={s_lastCommand}\nlastBackup={s_lastBackup}\nbackups={s_backupCount}\nversion={Version}\nevSent={s_evSent}\nevRecv={s_evRecv}\nsnapSent={s_snapSent}\nsnapRecv={s_snapRecv}\n";
+            text += $"fullModels={FullModels()}\n";
         }
         WriteStatusSafe(text);
+    }
+
+    // "Third Person Full Model Placeholders" (Nexus RE7 mod 86, installed as loose files)
+    // replaces the players' incomplete shadow models with complete ones under the same
+    // paths. REFramework only reads loose files with its Loose File Loader on, so:
+    // "1" = files present and loader on, "off" = files present but loader off, "0" = none.
+    // Re-checked every 10 s (players copy the files in while the game runs).
+    static string s_fullModels = "0";
+    static DateTime s_fullModelsAt = DateTime.MinValue;
+    static string FullModels()
+    {
+        if ((DateTime.Now - s_fullModelsAt).TotalSeconds < 10) return s_fullModels;
+        s_fullModelsAt = DateTime.Now;
+        try
+        {
+            var game = Path.GetFullPath(Path.Combine(s_dataDir, "..", ".."));
+            // "Use full models.cmd" moves the mod's models under natives\stm\coop (left in
+            // place they also replace the player's own first-person body).
+            var f = Path.Combine(game, "natives", "stm", "coop", "character", "player", "pl2000", "pl2001", "pl2001.mesh.220128762");
+            var unmoved = Path.Combine(game, "natives", "stm", "character", "player", "pl2000", "pl2001", "pl2001.mesh.220128762");
+            if (!File.Exists(f)) { s_fullModels = File.Exists(unmoved) ? "move" : "0"; return s_fullModels; }
+            var cfg = ReadShared(Path.Combine(game, "re2_fw_config.txt"));
+            s_fullModels = cfg.Contains("LooseFileLoader_Enabled=true") ? "1" : "off";
+        }
+        catch (Exception) { s_fullModels = "0"; }
+        return s_fullModels;
     }
 
     // coopnet_friends.txt for the Connect list: id<TAB>flags<TAB>coop version<TAB>name,

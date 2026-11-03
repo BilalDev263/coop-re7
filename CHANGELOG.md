@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.12 (after the first two-player session, 2026-11-02)
+- **Lobby**: see both players and their chapters, and pick how you look to your friend: Ethan, Mia, Mia (ship),
+  Clancy, Zoe, Chris, Joe. Works with RE7's own models; with the Nexus mod "Third Person Full Model
+  Placeholders" set up by **Use full models.cmd**, they're complete characters (your own view stays normal).
+- **Blocking shows**: your friend's character blocks when they do (and plays the other upper-body moves RE7 puts
+  on the player's body, like touching a door), on top of walking. Both players need v0.12.
+- **Enemy hand-offs work between two real games**: both games now send enemy movement (before, only one
+  did, so an enemy handed to the other player was taken back after 3 seconds: Jack flickered and only chased
+  one player).
+- **Doors close for both**, not just open. **Breakable boxes** and **drawers** are shared (new, untested).
+- **Pausing**: your enemies are handed to your friend while you're paused, and they see "Your friend paused
+  the game".
+- **Weapons stay for both players** (picking one up froze the other player mid-pickup).
+- **Share story reworked and off by default** (experimental): a friend's cutscene only pulls you in when you're in
+  the same chapter and within about 12 m; story progress is only copied for 30 seconds after a cutscene you
+  shared. (It used to push the player who was behind: a tape ended early, a chapter change got stuck.)
+- Fixes: friend sliding after a tape; friend vanishing after the basement ladder (a background story event
+  counted as a cutscene); stuck pause menu after a cut-short cutscene; Jack bouncing between games; save
+  guard briefly blocking saves when the settings file was read mid-write; installer avoids OneDrive folders.
+- Testing: bot buttons to smash the nearest box and open/shut the nearest drawer.
+- **Make a bug report** button: a zip of the logs on your desktop, personal details blanked out.
+- Logs are written once a second instead of on every line (less stutter late in a session); no more pile of
+  coop_dummy_log_HHMMSS files (the previous run is kept as coop_dummy_log_prev.txt).
+- **Reload last save** refuses after a chapter jump (it hung on the loading icon); restart and Continue instead.
+- Enemy copies hold the same weapon as the original.
+
 ## v0.11 (2026-10-31)
 - **Saving together**: when one player's game saves (tape recorder or autosave, with Allow saving on), the other
   sees "Your friend saved..." (and is told if their own saving is off), so you can both keep matching saves.

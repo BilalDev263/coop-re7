@@ -3,7 +3,10 @@
 -- through coop_world_on_event.
 --   unlock <door id> <chapter>  a door was unlocked (key, one-way door, story)
 --   open <door id> <chapter>    a door swung open
+--   close <door id> <chapter>   it swung shut again
 --   took <item id> <chapter> <item name>  a supply was picked up
+--   break <box id> <chapter>    a breakable box (app.ItemDropDestruct) was smashed
+--   drawer <id> <0|1> <chapter> a drawer (app.InteractDrawer) was shut / pulled open
 -- Doors (app.DoorPush) and items (app.Item) carry SaveGUID, saved in the level, so the id
 -- is the same on both PCs. Supplies (ammo, healing, materials, weapons) picked up by one
 -- player vanish for the other (Item.disableFromScene); key items, files and maps stay in
@@ -16,15 +19,25 @@ world_sync = {
     items = {},        -- id -> { it = Item, go }
     pending_took = {}, -- id -> chapter
     applying = {},     -- id -> clock: changes we made on the friend's word (not sent back)
+    props = {},        -- "box:<id>" / "drawer:<id>" -> { c = component, kind, on }
+    props_t = -100,
     sent = 0, applied = 0, msg = "-", msg_t = -100,
 }
 local ws = world_sync
 
+-- Lines are collected and appended once a second (was a full read + rewrite per line).
+local log_buf, log_t = {}, 0
 local function log(s)
+    log_buf[#log_buf + 1] = os.date("%H:%M:%S ") .. tostring(s)
+end
+re.on_frame(function()
+    if #log_buf == 0 or os.clock() - log_t < 1 then return end
+    log_t = os.clock()
     local f = fs.read("coop_world_log.txt") or ""
     if #f > 200000 then f = f:sub(-100000) end
-    fs.write("coop_world_log.txt", f .. os.date("%H:%M:%S ") .. s .. "\n")
-end
+    fs.write("coop_world_log.txt", f .. table.concat(log_buf, "\n") .. "\n")
+    log_buf = {}
+end)
 
 local function safe(f, ...)
     local ok, r = pcall(f, ...)
@@ -65,8 +78,10 @@ local function scene()
         sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
 end
 
--- Supplies are shared; keys, files and maps (ItemCategoryType 4, 5, 6, 9, 10) are not.
-local KEYISH = { [4] = true, [5] = true, [6] = true, [9] = true, [10] = true }
+-- Supplies are shared; weapons, keys, files and maps (ItemCategoryType 1, 4, 5, 6, 9, 10)
+-- are not. Weapon pickups start story beats (the Chapter 1 handgun): taking one away
+-- froze the friend mid-pickup (2026-11-02).
+local KEYISH = { [1] = true, [4] = true, [5] = true, [6] = true, [9] = true, [10] = true }
 local function is_supply(it)
     local d = safe(it.call, it, "get_ItemData")
     local cat = d and safe(d.get_field, d, "Category")
@@ -104,6 +119,7 @@ local function poll_doors(now)
         local ours = ws.applying[id] and now - ws.applying[id] < 3
         if s.locked and not locked and not ours then send(string.format("unlock %s %d", id, chapter())) end
         if open and not s.open and not ours then send(string.format("open %s %d", id, chapter())) end
+        if s.open and not open and not ours then send(string.format("close %s %d", id, chapter())) end
         s.locked, s.open = locked, open
     end
 end
@@ -119,8 +135,19 @@ local function apply_door(kind, id, ch)
             note("your friend unlocked a door")
         end
     elseif kind == "open" then
-        if not is_open(s.d:call("get_doorState")) and not s.d:call("get_isLocked") then
-            pcall(s.d.call, s.d, "requestAutoOpen(app.DoorPush.OpenSide)", 2)
+        local before = s.d:call("get_doorState")
+        if not is_open(before) and not s.d:call("get_isLocked") then
+            local ok, err = pcall(s.d.call, s.d, "requestAutoOpen(app.DoorPush.OpenSide)", 2)
+            log(string.format("opened door %s (state %s -> %s)%s", id, tostring(before),
+                tostring(safe(s.d.call, s.d, "get_doorState")), ok and "" or (" ERR " .. tostring(err))))
+        else
+            log(string.format("open door %s: already state %s, locked %s", id, tostring(before),
+                tostring(s.d:call("get_isLocked"))))
+        end
+    elseif kind == "close" then
+        if is_open(s.d:call("get_doorState")) then
+            local ok, err = pcall(s.d.call, s.d, "requestClosed(System.Boolean)", false)
+            log("closed door " .. id .. (ok and "" or (" ERR " .. tostring(err))))
         end
     end
     ws.applied = ws.applied + 1
@@ -186,11 +213,89 @@ local function poll_items(now)
     end
 end
 
+-- Boxes and drawers -----------------------------------------------------------------
+-- Both carry SaveGUID (boxes their own, drawers from InteractObjectBase). A smashed box
+-- is smashed for both (each game drops its own item; the supply rule then shares the
+-- pickup). Drawers follow open/shut. Untested on a real session yet: every apply logs
+-- the state before and after.
+local PROP_TYPES = {
+    { kind = "box", type = "app.ItemDropDestruct", state = function(c) return c:get_field("IsBreaked") == true end },
+    { kind = "drawer", type = "app.InteractDrawer", state = function(c) return c:get_field("NowDrawerOpen") == true end },
+}
+
+local function refresh_props()
+    local sc = scene()
+    if sc == nil then return end
+    local seen = {}
+    for _, pt in ipairs(PROP_TYPES) do
+        local arr = safe(sc.call, sc, "findComponents(System.Type)", sdk.typeof(pt.type))
+        for _, c in ipairs(arr and arr:get_elements() or {}) do
+            local id = id_of(c)
+            if id then
+                local key = pt.kind .. ":" .. id
+                seen[key] = true
+                if ws.props[key] == nil or ws.props[key].c ~= c then
+                    ws.props[key] = { c = c, kind = pt.kind, id = id, pt = pt, on = safe(pt.state, c) == true }
+                end
+            end
+        end
+    end
+    for key in pairs(ws.props) do if not seen[key] then ws.props[key] = nil end end
+end
+
+local function poll_props(now)
+    for key, s in pairs(ws.props) do
+        local on = safe(s.pt.state, s.c) == true
+        local ours = ws.applying[key] and now - ws.applying[key] < 3
+        if on ~= s.on and not ours then
+            if s.kind == "box" and on then send(string.format("break %s %d", s.id, chapter()))
+            elseif s.kind == "drawer" then send(string.format("drawer %s %d %d", s.id, on and 1 or 0, chapter())) end
+        end
+        s.on = on
+    end
+end
+
+local function apply_prop(kind, id, want, ch)
+    if ch ~= chapter() then return end
+    local key = kind .. ":" .. id
+    local s = ws.props[key]
+    if s == nil then log(kind .. " not loaded here: " .. id) return end
+    local before = safe(s.pt.state, s.c) == true
+    if before == want then return end
+    ws.applying[key] = os.clock()
+    local ok, err
+    if kind == "box" then
+        -- The hit path: RigidBodyDestruct.setBreak(dir, pos, normal, attacker, type).
+        local rb = safe(s.c.get_field, s.c, "RigidBodyCompo")
+        local go = s.c:call("get_GameObject")
+        local pos = go:call("get_Transform"):call("get_Position")
+        local up = Vector3f.new(0, 1, 0)
+        if rb then
+            ok, err = pcall(rb.call, rb, "setBreak(via.vec3, via.vec3, via.vec3, via.GameObject, System.UInt32)",
+                Vector3f.new(0, -1, 0), pos, up, nil, 0)
+        else
+            ok, err = false, "no RigidBodyCompo"
+        end
+        note("your friend smashed a box")
+    else
+        ok, err = pcall(s.c.call, s.c, "SetSwitch(System.Boolean)", want)
+        note(want and "your friend opened a drawer" or "your friend shut a drawer")
+    end
+    log(string.format("%s %s: %s -> %s%s", kind, id, tostring(before), tostring(safe(s.pt.state, s.c)),
+        ok and "" or (" ERR " .. tostring(err))))
+    ws.applied = ws.applied + 1
+end
+
 -- Incoming events (called by coop_enemies.lua). Returns true if it was ours.
 function coop_world_on_event(text)
     local kind, id, ch = text:match("^(unlock) (%S+) (%-?%d+)")
     if not kind then kind, id, ch = text:match("^(open) (%S+) (%-?%d+)") end
+    if not kind then kind, id, ch = text:match("^(close) (%S+) (%-?%d+)") end
     if kind then pcall(apply_door, kind, id, tonumber(ch)) return true end
+    local bid, bch = text:match("^break (%S+) (%-?%d+)")
+    if bid then pcall(apply_prop, "box", bid, true, tonumber(bch)) return true end
+    local did, don, dch = text:match("^drawer (%S+) ([01]) (%-?%d+)")
+    if did then pcall(apply_prop, "drawer", did, don == "1", tonumber(dch)) return true end
     local tid, tch, tname = text:match("^took (%S+) (%-?%d+) (%S+)")
     if tid then pcall(apply_took, tid, tonumber(tch), tname) return true end
     return false
@@ -203,6 +308,11 @@ re.on_frame(function()
         local ok, err = pcall(refresh_doors)
         if not ok and not ws.door_err then ws.door_err = true log("doors ERR " .. tostring(err)) end
     end
+    if now - ws.props_t > 3 then
+        ws.props_t = now
+        local ok, err = pcall(refresh_props)
+        if not ok and not ws.prop_err then ws.prop_err = true log("props ERR " .. tostring(err)) end
+    end
     if now - ws.items_t > 2 then
         ws.items_t = now
         local ok, err = pcall(refresh_items)
@@ -212,6 +322,8 @@ re.on_frame(function()
         ws.poll_t = now
         local ok, err = pcall(poll_doors, now)
         if not ok and not ws.poll_err then ws.poll_err = true log("door poll ERR " .. tostring(err)) end
+        local pok, perr = pcall(poll_props, now)
+        if not pok and not ws.ppoll_err then ws.ppoll_err = true log("prop poll ERR " .. tostring(perr)) end
         local iok, ierr = pcall(poll_items, now)
         if not iok and not ws.ipoll_err then ws.ipoll_err = true log("item poll ERR " .. tostring(ierr)) end
     end
@@ -264,6 +376,20 @@ function world_sync_bot(kind)
         local name = tostring(e.it:get_field("ItemDataID"))
         fs.write("coopnet_command.txt", string.format("botevent took %s %d %s", id, chapter(), name))
         return "the bot will take " .. name
+    elseif kind == "break" or kind == "drawer" then
+        local want = kind == "break" and "box" or "drawer"
+        local s, key = nearest(ws.props, function(s)
+            if s.kind ~= want then return false end
+            s.go = s.go or s.c:call("get_GameObject")
+            return want == "drawer" or not s.on
+        end)
+        if key == nil then return "no " .. want .. " nearby" end
+        if kind == "break" then
+            fs.write("coopnet_command.txt", string.format("botevent break %s %d", s.id, chapter()))
+            return "the bot will smash the nearest box"
+        end
+        fs.write("coopnet_command.txt", string.format("botevent drawer %s %d %d", s.id, s.on and 0 or 1, chapter()))
+        return "the bot will " .. (s.on and "shut" or "open") .. " the nearest drawer"
     end
 end
 
