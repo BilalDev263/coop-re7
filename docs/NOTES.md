@@ -1099,3 +1099,18 @@ Not synced / broken, as reported by the owner:
   no dynamic banks; the heal itself wasn't caught). Fallback: unbound action after 0.15 s retried in set 200.
   Bot walks through closed doors: the bot sends no door events (real friends do). Transient slide 13:18:04:
   walk layer froze, full rebuild after ~6 s (old watchdog path).
+- Left hand (2026-11-03): the player plays arm moves on layer 1 (mask 120) and layer 2 (mask 110) at once; only
+  the first action was sent. Second action now in the stance-flags field (motion ID bits 12-25, layer 26-28;
+  flags use bits 0-3, bit tests only, so v0.19 ignores it) and played on ghost layer 2 (run_slot). Bot keeps
+  LastLocal.Bank bits >= 12. Heal 2790 bound in set 0 at 13:24:05 (length 15) with no retry needed; the liquid is
+  a native item effect like the muzzle flash. Held-item check 1 s -> 0.25 s, grip at most every 2 s.
+- Weapon up while moving (2026-11-03): while walking, the player's layer 1 keeps sending 2001/2002 but the
+  visible walk is the weapon set's Move tree on layer 0; the ghost now replaces hold poses while moving with the
+  weapon set's 2020 (walk) / 2021 (jog, ghost speed > 2.2) on slot 1, mask 120: knife up, legs walk (owner OK).
+  Mask table: 16 ids (1,2,3,5,10,100,110,115,120,125,130,135,140,145,150,155), sizes 70/68/68/134/1/20/67/55/
+  69/55/2/6/12/1/2/1; player layers 1:120 2:110 3:125 4:110 5:150 6:130 7:155 8:135 9:140 10:145 11:145.
+  JointMaskInfo is native (elements unreadable from Lua). Full ghost rebuild is allowed again with a weapon set
+  (blocking it left a model switch stuck); only the length check is skipped.
+- Phone: InteractSendFsm under sm0113_Phone01A_AnswerPhoneCodex (stays IsEnable after answering, count 1).
+  INTR_SKIP matched only the interactable's own name ("InteractSendFsm"), never the parent: now object/parent/
+  grandparent. Phones sent as "intr <id> <ch> phone", applied when count is 0, pending if not loaded, in catch-up.

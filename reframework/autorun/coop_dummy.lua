@@ -386,6 +386,10 @@ function coop_ghost() return dummy end
 -- camera-only. Clips from any other bank can't be sent (the packet has no room for the bank):
 -- each one is logged once, to find what the ladder uses.
 -- The packet field is chapter + 256 * motion ID + 2^24 * layer.
+-- A second action on another layer (RE7 often plays one arm's move on layer 1, mask 120, and
+-- the other's on layer 2, mask 110, so with one action the left hand never moved) rides in
+-- the stance-flags field from bit 12: motion ID in bits 12-25, its layer in bits 26-28. The
+-- flags use bits 0-3 and are only ever bit-tested, so a v0.19 receiver ignores it.
 ACTION_LAYERS = { 4, 1, 2, 3, 5, 6, 7, 0 }
 local act = { motion = nil, motion_go = nil }
 function local_action_clip(player)
@@ -394,15 +398,23 @@ function local_action_clip(player)
         act.motion = safe(player.call, player, "getComponent(System.Type)", sdk.typeof("via.motion.Motion"))
     end
     local m = act.motion
-    if m == nil then return 0, 0 end
+    if m == nil then return 0, 0, 0, 0 end
     local count = tonumber(safe(m.call, m, "getLayerCount") or 0) or 0
+    local id1, li1
     for _, li in ipairs(ACTION_LAYERS) do
         if li < count then
             local L = safe(m.call, m, "getLayer", li)
             if L then
                 local bank = safe(L.call, L, "get_MotionBankID")
                 local id = tonumber(safe(L.call, L, "get_MotionID") or 0xFFFFFFFF) or 0xFFFFFFFF
-                if bank == 0 and id >= (li == 0 and 100 or 1000) and id < 65536 then return id, li end
+                if bank == 0 and id >= (li == 0 and 100 or 1000) and id < 65536 then
+                    if id1 == nil then
+                        id1, li1 = id, li
+                        if li == 0 then return id, li, 0, 0 end   -- full body: nothing goes on top
+                    elseif li ~= 0 and id < 16384 then
+                        return id1, li1, id, li
+                    end
+                end
                 if bank ~= nil and bank ~= 0 and bank ~= 1 and id < 0xFFFFFFFF then
                     act.unshared = act.unshared or {}
                     local k = li .. "/" .. tostring(bank) .. "/" .. id
@@ -414,13 +426,16 @@ function local_action_clip(player)
             end
         end
     end
-    return 0, 0
+    if id1 then return id1, li1, 0, 0 end
+    return 0, 0, 0, 0
 end
 
-local function action_field(player)
-    local id, li = local_action_clip(player)
-    if id == 0 then return 0 end
-    return 256 * id + 16777216 * li
+-- Both packet fields for our actions: (chapter field addition, stance-flags addition).
+local function action_fields(player)
+    local id, li, id2, li2 = local_action_clip(player)
+    local a = id == 0 and 0 or (256 * id + 16777216 * li)
+    local b = id2 == 0 and 0 or (id2 * 4096 + li2 * 67108864)
+    return a, b
 end
 
 local function net_io()
@@ -434,12 +449,13 @@ local function net_io()
         local tr = player:call("get_Transform")
         local p, q = tr:call("get_Position"), tr:call("get_Rotation")
         local ly, lp = local_look(q)
+        local a1, a2 = action_fields(player)
         net.seq = net.seq + 1
         -- animId carries our chapter; animFrame echoes the newest sender time we've
         -- received from the peer (mod 1000 s), so they can measure the round trip.
         fs.write("coopnet_out.txt", string.format("%d %.4f %.5f %.5f %.5f %.6f %.6f %.6f %.6f %d %d %.4f %.4f %.4f\n",
-            net.seq, now, p.x, p.y, p.z, q.x, q.y, q.z, q.w, local_stance_flags(player),
-            local_chapter() + action_field(player),
+            net.seq, now, p.x, p.y, p.z, q.x, q.y, q.z, q.w, local_stance_flags(player) + a2,
+            local_chapter() + a1,
             (net.peer_t or 0) % 1000, ly, lp))
     end
 
@@ -470,6 +486,9 @@ local function net_io()
                     net.peer_chapter = f % 256
                     net.peer_action = math.floor(f / 256) % 65536
                     net.peer_action_layer = math.floor(f / 16777216) % 8
+                    local fl = math.floor(v[10])
+                    net.peer_action2 = (fl >> 12) & 0x3FFF
+                    net.peer_action2_layer = (fl >> 26) & 7
                     -- Round trip: the peer echoes our own send time (mod 1000 s).
                     if v[12] and v[12] > 0 then
                         local rtt = (now % 1000) - v[12]
@@ -781,7 +800,7 @@ function rebuild_layer()
     safe(tl.add_ref, tl)
     safe(tl.call, tl, ".ctor")
     safe(anim.motion.call, anim.motion, "setLayerCount", 1)
-    anim.action = nil   -- the action layer went with it; ghost_action re-adds it
+    anim.action, anim.action2 = nil, nil   -- the action layers went with it; ghost_action re-adds them
     local _, err = safe(anim.motion.call, anim.motion, "setLayer", 0, tl)
     log("rebuild_layer: new TreeLayer on slot 0" .. (err and (" ERR " .. tostring(err)) or ""))
 end
@@ -880,7 +899,7 @@ local function verify_playback()
         local bad = anim.playing
         -- Several rebuilds in a row that still don't bind: rebuild the whole ghost.
         anim.fail_streak = (anim.fail_streak or 0) + 1
-        if anim.fail_streak >= 3 and not weapon_set and os.clock() - (anim.last_full_rebuild or -100) > 30 then
+        if anim.fail_streak >= 3 and os.clock() - (anim.last_full_rebuild or -100) > 30 then
             anim.last_full_rebuild = os.clock()
             anim.fail_streak = 0
             log("verify: layer rebuilds keep failing; rebuilding the whole Ethan ghost")
@@ -979,60 +998,61 @@ local function start_clip(L, want)
     end
 end
 
-function ghost_action()
-    if not anim.ready or anim.motion == nil or anim.change == nil then return end
-    -- test_action: set from a probe (bot tests); forced_action: coop_revive's lying-down pose.
-    local want = net.test_action or net.forced_action or net.peer_action or 0
-    local src_layer = (net.test_action and (net.test_action_layer or 1))
-        or (net.forced_action and (net.forced_action_layer or 0)) or (net.peer_action_layer or 1)
-    local m = anim.motion
-    -- Weapon moves share IDs across the weapons' animation sets (all bank 0); the body's
-    -- TargetBankType picks the set (0 hands, 30 knife, 100 handgun...), as on the friend's
-    -- body. It must stay set while the clip plays: the clip binds a frame later (switching
-    -- back right after changeMotion bound nothing). Walk and idle stay the same clips.
-    local bank = anim.bank_override or (not net.test_action and not net.forced_action and held and held.bank_got) or 0
-    if bank ~= anim.bank or tonumber(safe(m.call, m, "get_TargetBankType")) ~= bank then
-        anim.bank = bank
-        safe(m.call, m, "set_TargetBankType", bank)
+local function base_bank()
+    return (not net.test_action and not net.forced_action and held and held.bank_got) or 0
+end
+
+-- Weapon holding poses (20xx stand/walk/jog loops, 2200-2204 aim loops) use a mask that
+-- covers the legs too (the player never sees their legs): while the body moves they froze
+-- its walk into a slide, so they only play standing still. Swings and blocks always play.
+local function hold_pose(id) return (id >= 2000 and id < 2100) or (id >= 2200 and id <= 2204) end
+-- While moving, the friend's body plays no hold pose on its arm layer: RE7 swaps the whole
+-- walk for the weapon's (inside the layer-0 Move tree), so the ghost, walking with the
+-- bare-hands clips, carried the weapon at its side (2026-11-03). Each weapon set has its walk
+-- and jog loops at 2020 and 2021: played on the arm layer (mask 120, upper body), they hold the
+-- weapon up while the legs keep the ghost's own directional walk.
+local WEAPON_WALK, WEAPON_JOG = 2020, 2021
+
+local function action_layer(m, idx)
+    if (tonumber(safe(m.call, m, "getLayerCount") or 0) or 0) < idx + 1 then safe(m.call, m, "setLayerCount", idx + 1) end
+    if safe(m.call, m, "getLayer", idx) == nil then
+        local tl = safe(sdk.create_instance, "via.motion.TreeLayer")
+        if tl then safe(tl.add_ref, tl) safe(tl.call, tl, ".ctor") safe(m.call, m, "setLayer", idx, tl) end
     end
-    -- Weapon holding poses (20xx stand/walk/jog loops, 2200-2204 aim loops) use a mask that
-    -- covers the legs too (the player never sees their legs): while the body moves they froze
-    -- its walk into a slide, so they only play standing still. Swings and blocks always play.
-    if anim.moving and not net.forced_action and ((want >= 2000 and want < 2100) or (want >= 2200 and want <= 2204)) then
-        want = 0
-    end
+    return safe(m.call, m, "getLayer", idx)
+end
+
+-- One action slot: the ghost's layer idx plays the friend's move from their layer src_layer,
+-- with that layer's mask and blend mode. Slot 1 (key "action") is the first move found,
+-- slot 2 (key "action2") the second, usually the other arm.
+local function run_slot(m, idx, key, want, src_layer)
+    if anim.moving and not net.forced_action and hold_pose(want) and want ~= WEAPON_WALK and want ~= WEAPON_JOG then want = 0 end
     -- (Tried 2026-11-03: merging 2002 into 2001 and fading the layer in/out over 0.15 s made
     -- swings stop matching; the plain snap below looked better.)
-    if want == (anim.action or 0) then
-        if want ~= 0 and anim.retry_at and os.clock() >= anim.retry_at then
-            anim.retry_at = nil
-            local L = safe(m.call, m, "getLayer", 1)
-            if L and (tonumber(safe(L.call, L, "get_EndFrame")) or 0) <= 0 and bank ~= ITEM_SET then
+    if want == (anim[key] or 0) then
+        local rk = key .. "_retry"
+        if want ~= 0 and anim[rk] and os.clock() >= anim[rk] then
+            anim[rk] = nil
+            local L = safe(m.call, m, "getLayer", idx)
+            if L and (tonumber(safe(L.call, L, "get_EndFrame")) or 0) <= 0 and anim.bank ~= ITEM_SET then
+                local was = anim.bank
                 anim.bank_override, anim.bank = ITEM_SET, ITEM_SET
                 safe(m.call, m, "set_TargetBankType", ITEM_SET)
                 start_clip(L, want)
-                log(string.format("action: motion %d had no clip in set %d, retrying in the item set", want, bank))
+                log(string.format("action: motion %d had no clip in set %s, retrying in the item set", want, tostring(was)))
             end
         end
         return
     end
-    if anim.bank_override then
+    if anim.bank_override and want ~= 0 then
         -- A new move: back to the friend's own set.
         anim.bank_override = nil
-        bank = (not net.test_action and not net.forced_action and held and held.bank_got) or 0
-        anim.bank = bank
-        safe(m.call, m, "set_TargetBankType", bank)
+        anim.bank = base_bank()
+        safe(m.call, m, "set_TargetBankType", anim.bank)
     end
-    if (tonumber(safe(m.call, m, "getLayerCount") or 0) or 0) < 2 then
-        safe(m.call, m, "setLayerCount", 2)
-        if safe(m.call, m, "getLayer", 1) == nil then
-            local tl = safe(sdk.create_instance, "via.motion.TreeLayer")
-            if tl then safe(tl.add_ref, tl) safe(tl.call, tl, ".ctor") safe(m.call, m, "setLayer", 1, tl) end
-        end
-    end
-    local L = safe(m.call, m, "getLayer", 1)
+    local L = action_layer(m, idx)
     if L == nil then return end
-    anim.action = want
+    anim[key] = want
     if want == 0 then
         safe(L.call, L, "set_BlendRate", 0.0)
         return
@@ -1044,11 +1064,41 @@ function ghost_action()
     if mode then safe(L.call, L, "set_BlendMode", mode) end
     safe(L.call, L, "set_Resource", nil)
     start_clip(L, want)
-    anim.retry_at = os.clock() + 0.15
+    anim[key .. "_retry"] = os.clock() + 0.15
     safe(L.call, L, "set_Speed", 1.0)
     safe(L.call, L, "set_BlendRate", 1.0)
-    log(string.format("action: friend plays motion %d from layer %d (mask %s, mode %s, set %d, length %s)", want,
-        src_layer, tostring(mask), tostring(mode), bank, tostring(safe(L.call, L, "get_EndFrame"))))
+    log(string.format("action: friend plays motion %d from layer %d on slot %d (mask %s, mode %s, set %s)", want,
+        src_layer, idx, tostring(mask), tostring(mode), tostring(anim.bank)))
+end
+
+function ghost_action()
+    if not anim.ready or anim.motion == nil or anim.change == nil then return end
+    -- test_action: set from a probe (bot tests); forced_action: coop_revive's lying-down pose.
+    local want = net.test_action or net.forced_action or net.peer_action or 0
+    local src_layer = (net.test_action and (net.test_action_layer or 1))
+        or (net.forced_action and (net.forced_action_layer or 0)) or (net.peer_action_layer or 1)
+    local want2 = (not net.test_action and not net.forced_action and net.peer_action2) or 0
+    local m = anim.motion
+    -- Weapon moves share IDs across the weapons' animation sets (all bank 0); the body's
+    -- TargetBankType picks the set (0 hands, 30 knife, 100 handgun...), as on the friend's
+    -- body. It must stay set while the clip plays: the clip binds a frame later (switching
+    -- back right after changeMotion bound nothing). Walk and idle stay the same clips.
+    local bank = anim.bank_override or base_bank()
+    if bank ~= anim.bank or tonumber(safe(m.call, m, "get_TargetBankType")) ~= bank then
+        anim.bank = bank
+        safe(m.call, m, "set_TargetBankType", bank)
+    end
+    if anim.moving and not net.forced_action and (want == 0 or hold_pose(want))
+        and base_bank() ~= 0 and base_bank() ~= ITEM_SET then
+        -- Walk or jog by the ghost's own speed (refs: walk 1.7, jog 2.7 m/s).
+        want, src_layer = (anim.speed or 0) > 2.2 and WEAPON_JOG or WEAPON_WALK, 1
+    end
+    run_slot(m, 1, "action", want, src_layer)
+    -- The second move goes on top; not under a full-body move from layer 0.
+    if src_layer == 0 and want ~= 0 then want2 = 0 end
+    if want2 ~= 0 or (anim.action2 or 0) ~= 0 then
+        run_slot(m, 2, "action2", want2, net.peer_action2_layer or 2)
+    end
 end
 
 local function auto_animate(anchor, anchor_rot)
@@ -1184,7 +1234,7 @@ function assemble_from(c)
     -- ...and the old ghost's Motion: until setup_animation binds the new one, head look
     -- and the watchdog must not touch it (that was the remaining Invoke error, 21:04).
     anim.motion, anim.ready, anim.verify_at, anim.last_verify_frame = nil, false, nil, nil
-    anim.action = nil
+    anim.action, anim.action2 = nil, nil
 
     local list = meshes_under(root)
     log("assemble: " .. #list .. " meshes under root")
@@ -2149,7 +2199,7 @@ function show_friend_weapon_again() show_held() end
 
 re.on_frame(function()
     local now = os.clock()
-    if now - (held.check_t or 0) < 1 then return end
+    if now - (held.check_t or 0) < 0.25 then return end   -- was 1 s: the healing bottle showed late
     held.check_t = now
     local kv = net.kv or {}
     if (kv.mode == "steam" or kv.mode == "bot") and coop_send_event then
@@ -2177,8 +2227,8 @@ re.on_frame(function()
             local joint = tostring(safe(tr.call, tr, "get_ParentJoint") or "R_Wep")
             if joint == "" then joint = "R_Wep" end
             local g = string.format("%.3f %.3f %.3f %.4f %.4f %.4f %.4f %s", lp.x, lp.y, lp.z, lq.w, lq.x, lq.y, lq.z, joint)
-            if g ~= held.grip_sent then
-                held.grip_sent = g
+            if g ~= held.grip_sent and (held.grip_sent == nil or now - (held.grip_t or -100) > 2) then
+                held.grip_sent, held.grip_t = g, now
                 coop_send_event("grip " .. g)
             end
         end

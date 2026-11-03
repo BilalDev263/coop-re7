@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.20 (2026-11-03)
+Tested with the bot: both hands, weapon up while walking, the item in hand. Phone sharing needs two players. Both players need v0.20 for the new moves (v0.19 still connects).
+- **Both hands move**: RE7 often plays one arm's move on one layer and the other arm's on another; only one
+  was shared, so your friend's left hand stayed still. A second move now goes along (in spare bits of the
+  movement update, so v0.19 still understands the rest) and plays on its own layer.
+- **The item in hand shows sooner** (checked 4 times a second instead of once).
+- **Weapon up while walking and running**: your friend's character carries their weapon raised while moving, not
+  only when standing still (tested with the knife).
+- **Phone calls are shared**: when one of you answers a phone, the other's phone is answered too, so you don't
+  both have to take every call to move on (also when they get there later, and after a rejoin). Untested
+  between two players.
+- **Fixed: things that must never be shared could be.** The list (saving at tape recorders, VHS tapes, item
+  boxes, cutscene triggers) checked the wrong object name and never matched.
+- Fixed: after switching characters in the Lobby with a weapon out, your friend's character could stay sliding
+  or T-posed (the animation watchdog wasn't allowed to rebuild it while a weapon was out).
+
 ## v0.19 (2026-11-03)
 Both players need v0.19. Tested with the bot: quick messages, pings, health and the catch-up button work; the rest was tested offline (a simulated game, 21 checks).
 - **Catching up after a rejoin**: each game keeps a list of the lasting changes it made (doors unlocked, boxes

@@ -293,13 +293,30 @@ local PROP_TYPES = {
         state = function(c) return c:get_field("NowSwitchOn") == true end },
 }
 local function interactions_shared() return not (settings and settings.share_interactions == false) end
--- Never share these: saving (tape recorders), VHS tapes (followed separately), phones, item
--- boxes, cutscene triggers. Matched on the interactable's GameObject name.
-local INTR_SKIP = { "save", "tape", "video", "vhs", "record", "phone", "tel", "itembox", "box", "event", "cs_" }
-local function intr_allowed(c)
+-- Never share these: saving (tape recorders), VHS tapes (followed separately), item boxes,
+-- cutscene triggers. Matched on the names of the interactable's GameObject, its parent and
+-- grandparent: the interactable itself is mostly just "InteractSendFsm" and the telling name
+-- is on its parent (sm0113_Phone01A_AnswerPhoneCodex), so until v0.20 this list never matched.
+local INTR_SKIP = { "save", "tape", "video", "vhs", "record", "itembox", "event", "cs_" }
+local function intr_names(c)
+    local out = {}
     local go = safe(c.call, c, "get_GameObject")
-    local name = (go and tostring(safe(go.call, go, "get_Name") or "") or ""):lower()
-    for _, w in ipairs(INTR_SKIP) do if name:find(w, 1, true) then return false end end
+    for _ = 1, 3 do
+        if go == nil then break end
+        out[#out + 1] = tostring(safe(go.call, go, "get_Name") or ""):lower()
+        local tr = safe(go.call, go, "get_Transform")
+        local par = tr and safe(tr.call, tr, "get_Parent")
+        go = par and safe(par.call, par, "get_GameObject")
+    end
+    return table.concat(out, "/")
+end
+-- Phones are shared on purpose (v0.20): when one player answers a call, the other's phone is
+-- answered too, so both don't have to take every call to move on.
+local function is_phone(c) return intr_names(c):find("phone", 1, true) ~= nil end
+local function intr_allowed(c)
+    local names = intr_names(c)
+    if names:find("phone", 1, true) then return true end
+    for _, w in ipairs(INTR_SKIP) do if names:find(w, 1, true) then return false end end
     return true
 end
 
@@ -331,7 +348,7 @@ local function poll_props(now)
             if s.kind == "box" and on then send(string.format("break %s %d", s.id, chapter()))
             elseif s.kind == "drawer" then send(string.format("drawer %s %d %d", s.id, on and 1 or 0, chapter()))
             elseif s.kind == "intr" and on and interactions_shared() and intr_allowed(s.c) then
-                send(string.format("intr %s %d", s.id, chapter()))
+                send(string.format("intr %s %d%s", s.id, chapter(), is_phone(s.c) and " phone" or ""))
             elseif s.kind == "switch" and interactions_shared() then
                 send(string.format("switch %s %d %d", s.id, on and 1 or 0, chapter()))
             end
@@ -340,15 +357,15 @@ local function poll_props(now)
     end
 end
 
-local function apply_prop(kind, id, want, ch)
+local function apply_prop(kind, id, want, ch, phone)
     if ch ~= chapter() then return end
     local key = kind .. ":" .. id
     local s = ws.props[key]
     if s == nil then
-        if kind ~= "intr" then
+        if kind ~= "intr" or phone then
             -- Boxes, drawers and switches keep their state: applied when that area loads here.
             -- One-off interactions aren't replayed later (they can start scripted moments).
-            ws.pending_props[key] = { kind = kind, id = id, want = want, ch = ch }
+            ws.pending_props[key] = { kind = kind, id = id, want = want, ch = ch, phone = phone }
             log("remembered " .. kind .. ": " .. id)
         else
             log(kind .. " not loaded here: " .. id)
@@ -397,9 +414,13 @@ local function apply_prop(kind, id, want, ch)
             note("your friend smashed a box")
         end
     elseif kind == "intr" then
-        if not intr_allowed(s.c) then log("intr " .. id .. ": not shared here (save, tape, phone...)") return end
+        if not intr_allowed(s.c) then log("intr " .. id .. ": not shared here (save, tape, item box...): " .. intr_names(s.c)) return end
         ok, err = pcall(s.c.call, s.c, "successInteract")
-        note("your friend used something here (" .. tostring(safe(function() return s.c:call("get_GameObject"):call("get_Name") end)) .. ")")
+        if phone or is_phone(s.c) then
+            note("your friend answered the phone: the call plays for you too")
+        else
+            note("your friend used something here (" .. intr_names(s.c) .. ")")
+        end
     elseif kind == "switch" then
         ok, err = pcall(s.c.call, s.c, "SetSwitch(System.Boolean)", want)
         note(want and "your friend switched something on" or "your friend switched something off")
@@ -506,7 +527,7 @@ local function apply_pending()
     for key, p in pairs(ws.pending_props) do
         if ws.props[key] and p.ch == chapter() then
             ws.pending_props[key] = nil
-            pcall(apply_prop, p.kind, p.id, p.want, p.ch)
+            pcall(apply_prop, p.kind, p.id, p.want, p.ch, p.phone)
         end
     end
 end
@@ -521,9 +542,11 @@ function coop_world_on_event(text)
     if bid then pcall(apply_prop, "box", bid, true, tonumber(bch)) return true end
     local did, don, dch = text:match("^drawer (%S+) ([01]) (%-?%d+)")
     if did then pcall(apply_prop, "drawer", did, don == "1", tonumber(dch)) return true end
-    local iid, ich = text:match("^intr (%S+) (%-?%d+)")
+    local iid, ich, itag = text:match("^intr (%S+) (%-?%d+) ?(%a*)")
     if iid then
-        if interactions_shared() then pcall(apply_prop, "intr", iid, true, tonumber(ich)) end
+        -- Phone calls move the story on, so they're shared even with "Share interactions" off.
+        local phone = itag == "phone"
+        if phone or interactions_shared() then pcall(apply_prop, "intr", iid, true, tonumber(ich), phone) end
         return true
     end
     local sid, son, sch = text:match("^switch (%S+) ([01]) (%-?%d+)")

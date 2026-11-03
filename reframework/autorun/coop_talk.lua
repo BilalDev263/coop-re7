@@ -80,6 +80,7 @@ local function list_key(text)
     local kind, id = text:match("^(%a+) (%S+)")
     if kind == "unlock" or kind == "break" or kind == "took" then return kind .. ":" .. id end
     if kind == "drawer" or kind == "switch" then return kind .. ":" .. id end
+    if kind == "intr" and text:match(" phone$") then return "intr:" .. id end   -- answered calls
     if kind == "kill" then
         local name = text:match("^kill %S+ %-?%d+ (%S+)")
         -- Only the Molded die for good; Jack and bosses get back up, so their kills aren't replayed.

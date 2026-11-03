@@ -1,4 +1,4 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.19)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.20)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
 or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
@@ -13,7 +13,7 @@ over Steam (no port forwarding).
 
 | | |
 |---|---|
-| **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, and the moves RE7 plays on your body (blocking, weapon swings, touching doors, and full-body moves like ladders). A downed friend lies on the floor. Their weapon in hand. A marker with the distance, pointing the way when they're off screen. How you look: pick a character in the **Lobby**. |
+| **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, and the moves RE7 plays on your body (blocking, weapon swings, both hands, the weapon held up while walking, climbing, getting hit, touching doors). A downed friend lies on the floor. Their weapon or the item they're using in hand. A marker with the distance, pointing the way when they're off screen. How you look: pick a character in the **Lobby**. |
 | **Enemies** (early) | Each enemy is run by the game of the player nearest to it and follows along in the other game; it changes hands when the other player gets clearly closer, and when one of you pauses. Damage and deaths count in both games, and your friend's hits make the enemy flinch (experimental). **Bosses** (Jack's garage car fight and later, found by story progress) run in each game on their own, with shared damage and defeat. |
 | **Doors, drawers, boxes, interactions** | A door unlocked, opened or closed in one game does the same in the other. Drawers open and shut for both; a breakable box smashed by one disappears for the other (no pieces), and each of you gets its item. One-off interactions (the fridge, the van, the pot, switches) happen in both games (experimental). |
 | **Supplies** | Ammo, healing and crafting materials picked up by one player disappear for the other. Weapons, keys, files and maps stay for both, so nobody gets stuck; when one of you takes one, the other is told to pick it up too. |
@@ -24,7 +24,7 @@ over Steam (no port forwarding).
 | **Pushed objects** (experimental) | Chairs, bottles and other loose props one of you knocks around move for the other too. |
 | **Catching up** | Each game keeps a list of the lasting changes it made (doors unlocked, boxes smashed, drawers, switches, supplies taken, Molded killed) for 12 hours. When your friend joins or rejoins, the list is sent and their game catches up, including what you did while they were away. |
 | **Talking** | Quick messages with **F5** (ping: "Over here"), **F6** (Come here), **F7** (Wait for me) and **F8** (Help!): your friend sees them at the top of the screen, and a marker for pings, Come here and Help. Each other's **health** shows on the status line and nameplate. |
-| Not shared | Item boxes, puzzles, phone calls, weapon sounds. |
+| Not shared | Item boxes, puzzles, weapon sounds. |
 
 Made with [coop-anything](https://github.com/cranebeaker/coop-anything). MIT licensed.
 
@@ -95,7 +95,7 @@ switched off first). **Teleport to my friend** works once you're within 40 m of 
 | **Friend's footsteps** | Hear your friend's footsteps where they walk (walk, jog and crouch sounds). |
 | **Share story (cutscenes and progress, experimental)** | Off by default. When ticked, a story cutscene your friend reaches also plays for you, but only if you're in the same chapter and within about 12 m of them; otherwise you see it yourself when you get there. Story progress is copied only right after a cutscene you watched together, so a player who's behind is never pushed ahead. |
 | **Follow my friend into VHS tapes** | On by default. When your friend goes from your chapter into a tape, your game jumps into it after them a few seconds later (saving is switched off first). Never back out: finish the tape. |
-| **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes, phones or item boxes). Turn off if one ever does something odd. |
+| **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes or item boxes). Turn off if one ever does something odd. **Phone calls** are always shared: when one of you answers, the other's phone is answered too. |
 | **Share pushed objects** (experimental) | On by default. Loose props one of you moves are moved in the other game too. |
 | **Go to my friend's chapter** | Jump to the start of the chapter your friend is in. Saving is switched off first. |
 | **Teleport to my friend** | Hop to them when you're within 40 m (same chapter). Further away, walk: RE7 only loads the area around you. |

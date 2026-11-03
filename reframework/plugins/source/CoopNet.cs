@@ -227,7 +227,7 @@ public class CoopNet
                 double step = c.botTurnRateDeg * Math.PI / 180 * dt;
                 s_fyaw += (float)(Math.Abs(diff) <= step ? diff : Math.Sign(diff) * step);
                 s.Qx = 0; s.Qy = (float)Math.Sin(s_fyaw / 2); s.Qz = 0; s.Qw = (float)Math.Cos(s_fyaw / 2);
-                s.Bank = 4u | (at.Bank & 1u);
+                s.Bank = 4u | (at.Bank & 1u) | (LastLocal.Bank & 0xFFFFF000u);   // + our second action, live like Id
                 s.LookYaw = 0; s.LookPitch = 0;
                 Expect = (at.Bank & 1u) != 0 ? "waiting near you, crouched" : "waiting near you";
             }
@@ -235,7 +235,7 @@ public class CoopNet
             {
                 // Replay our facing, stance and look on that stretch.
                 s.Qx = at.Qx; s.Qy = at.Qy; s.Qz = at.Qz; s.Qw = at.Qw;
-                s.Bank = (at.Bank & 3u) | 4u;   // our stance, but never our cutscene bit (it hid the bot)
+                s.Bank = (at.Bank & 3u) | 4u | (LastLocal.Bank & 0xFFFFF000u);   // our stance, never our cutscene bit (it hid the bot); our second action
                 s.LookYaw = at.LookYaw; s.LookPitch = at.LookPitch;
                 s_fyaw = (float)(2 * Math.Atan2(at.Qy, at.Qw));
                 Expect = "following you (" + ((at.Bank & 1u) != 0 ? "crouch" : (at.Bank & 2u) != 0 ? "walk" : "jog") +
@@ -550,7 +550,7 @@ public class CoopNet
         public float LookYaw, LookPitch;   // camera relative to body, radians
     }
 
-    const string Version = "0.19";
+    const string Version = "0.20";
     const int PacketSize = 64;
     static readonly byte[] Magic = { (byte)'R', (byte)'7', (byte)'C', (byte)'2' };
     const int KeepSamples = 32;
