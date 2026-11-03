@@ -998,6 +998,39 @@ local function start_clip(L, want)
     end
 end
 
+-- Ladders. RE7 has no ladder animation for the player's body: climbing plays the layer-0
+-- turn trees (IDs 4/5 going up, 6/7 going down, 9 and 11 at the ends) while the game moves
+-- the player, so the friend's character just floated up (2026-11-03). Climbing is recognised
+-- here from the ghost's own movement instead (mostly vertical, at least 0.35 m/s, for 0.4 s;
+-- stairs move forwards too, drops are brief), and two of Ethan's clips stand in for it,
+-- looped as a full-body move: Hands_ClimbWall-119cm going up, Hands_Descend_Loop going down.
+local CLIMB_UP, CLIMB_DOWN = 443, 407
+-- Off (2026-11-03): detection worked, but both stand-in clips looked wrong on a ladder. The
+-- climb is still logged; set to true to try other clips.
+LADDER_STAND_IN = false
+local climb = { vy = 0 }
+local function climb_state(anchor)
+    if anchor == nil then return nil end
+    local now = os.clock()
+    if climb.t == nil then
+        climb.y, climb.t = anchor.y, now
+    elseif now - climb.t > 0.05 then
+        local vy = (anchor.y - climb.y) / (now - climb.t)
+        climb.vy = climb.vy * 0.6 + vy * 0.4
+        climb.y, climb.t = anchor.y, now
+    end
+    local flat = (anim.speed or 0) < 0.6
+    local s = (climb.vy > 0.35 and flat and "up") or (climb.vy < -0.35 and flat and "down") or nil
+    if s ~= climb.cand then climb.cand, climb.cand_t = s, now end
+    if s and now - climb.cand_t > 0.4 then
+        if climb.state ~= s then log("ladder: friend climbing " .. s) end
+        climb.state = s
+    elseif s == nil and climb.state and now - climb.cand_t > 0.3 then
+        climb.state = nil
+    end
+    return climb.state
+end
+
 local function base_bank()
     return (not net.test_action and not net.forced_action and held and held.bank_got) or 0
 end
@@ -1030,6 +1063,14 @@ local function run_slot(m, idx, key, want, src_layer)
     -- (Tried 2026-11-03: merging 2002 into 2001 and fading the layer in/out over 0.15 s made
     -- swings stop matching; the plain snap below looked better.)
     if want == (anim[key] or 0) then
+        if want == CLIMB_UP or want == CLIMB_DOWN then
+            -- Loop the stand-in clip while the climb lasts.
+            local L = safe(m.call, m, "getLayer", idx)
+            local f = L and tonumber(safe(L.call, L, "get_Frame"))
+            local e = L and tonumber(safe(L.call, L, "get_EndFrame"))
+            if f and e and e > 0 and f >= e - 1 then start_clip(L, want) end
+            return
+        end
         local rk = key .. "_retry"
         if want ~= 0 and anim[rk] and os.clock() >= anim[rk] then
             anim[rk] = nil
@@ -1071,7 +1112,7 @@ local function run_slot(m, idx, key, want, src_layer)
         src_layer, idx, tostring(mask), tostring(mode), tostring(anim.bank)))
 end
 
-function ghost_action()
+function ghost_action(anchor)
     if not anim.ready or anim.motion == nil or anim.change == nil then return end
     -- test_action: set from a probe (bot tests); forced_action: coop_revive's lying-down pose.
     local want = net.test_action or net.forced_action or net.peer_action or 0
@@ -1088,7 +1129,10 @@ function ghost_action()
         anim.bank = bank
         safe(m.call, m, "set_TargetBankType", bank)
     end
-    if anim.moving and not net.forced_action and (want == 0 or hold_pose(want))
+    local cs = not net.forced_action and not net.test_action and climb_state(anchor)
+    if cs and LADDER_STAND_IN then
+        want, src_layer, want2 = (cs == "up") and CLIMB_UP or CLIMB_DOWN, 0, 0
+    elseif anim.moving and not net.forced_action and (want == 0 or hold_pose(want))
         and base_bank() ~= 0 and base_bank() ~= ITEM_SET then
         -- Walk or jog by the ghost's own speed (refs: walk 1.7, jog 2.7 m/s).
         want, src_layer = (anim.speed or 0) > 2.2 and WEAPON_JOG or WEAPON_WALK, 1
@@ -1418,7 +1462,7 @@ re.on_frame(function()
     pcall(verify_playback)
     local aok, aerr = pcall(auto_animate, anchor, anchor_rot)
     if aok then
-        local cok, cerr = pcall(ghost_action)
+        local cok, cerr = pcall(ghost_action, anchor)
         if not cok and not anim.action_err then anim.action_err = true log("action ERR " .. tostring(cerr)) end
     end
     if not aok and not anim.auto_err then anim.auto_err = true log("auto ERR " .. tostring(aerr)) end
@@ -1822,6 +1866,9 @@ local function draw_options()
     if pc then settings.share_physics = pv save_settings() end
     local phc, phv = imgui.checkbox("Share phone calls (one of you answers, both get the call)", settings.share_phones ~= false)
     if phc then settings.share_phones = phv save_settings() end
+    local suc, suv = imgui.checkbox("Share supplies (harder: one copy of ammo and healing for both; set it the same)",
+        settings.share_supplies == true)
+    if suc then settings.share_supplies = suv save_settings() end
 end
 
 -- Help: what to reach for when something goes wrong.

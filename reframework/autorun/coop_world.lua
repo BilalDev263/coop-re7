@@ -167,6 +167,11 @@ local function apply_door(kind, id, ch)
 end
 
 -- Items ------------------------------------------------------------------------------
+-- "Share supplies" (off by default since v0.22): on, ammo and healing are one copy for both
+-- players (whoever picks it up takes it from both worlds, the harder way to play); off, each
+-- player gets their own. Each game applies its own player's choice, so set it the same.
+local function supplies_shared() return settings ~= nil and settings.share_supplies == true end
+
 -- Items dropped by smashed boxes: each player gets their own (the friend's game rolls its
 -- own from the box's table), so their pickups are never shared. Both games' copies may
 -- carry the same SaveGUID.
@@ -201,7 +206,7 @@ local function refresh_items()
     for id in pairs(ws.items) do if not seen[id] then ws.items[id] = nil end end
     box_item_ids()
     -- Pickups the friend made before this area was loaded here.
-    for id, ch in pairs(ws.pending_took) do
+    for id, ch in pairs(supplies_shared() and ws.pending_took or {}) do
         local e = ws.items[id]
         if e and ch == chapter() and safe(e.go.call, e.go, "get_Draw") then
             ws.pending_took[id] = nil
@@ -214,6 +219,7 @@ end
 
 local function apply_took(id, ch, name)
     if ch ~= chapter() then return end
+    if not supplies_shared() then log("friend took " .. tostring(name) .. ": yours stays (Share supplies is off)") return end
     if ws.box_items and ws.box_items[id] then log("box item stays here: " .. name) return end
     local e = ws.items[id]
     if e and safe(e.go.call, e.go, "get_Draw") then

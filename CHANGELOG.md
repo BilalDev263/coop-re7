@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.22 (2026-11-03)
+Untested in play (a small change). Works with v0.21; set Share supplies the same on both sides.
+- **Each player gets their own supplies** by default (ammo, healing, crafting materials). **Share supplies** in
+  Options brings back one copy for both, for a harder game (both players should set it the same).
+
 ## v0.21 (2026-11-03)
 The window cleanup was checked in game; the rest is small and tested offline. Works with v0.20.
 - **Tidier RE7 Co-op window**: Lobby, Talk and catch up, Connect and saving, **Options** (what's shown and

@@ -1,4 +1,4 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.21)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.22)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
 or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
@@ -16,7 +16,7 @@ over Steam (no port forwarding).
 | **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, and the moves RE7 plays on your body (blocking, weapon swings, both hands, the weapon held up while walking, climbing, getting hit, touching doors). A downed friend lies on the floor. Their weapon or the item they're using in hand. A marker with the distance, pointing the way when they're off screen. How you look: pick a character in the **Lobby**. |
 | **Enemies** (early) | Each enemy is run by the game of the player nearest to it and follows along in the other game; it changes hands when the other player gets clearly closer, and when one of you pauses. Damage and deaths count in both games, and your friend's hits make the enemy flinch (experimental). **Bosses** (Jack's garage car fight and later, found by story progress) run in each game on their own, with shared damage and defeat. |
 | **Doors, drawers, boxes, interactions** | A door unlocked, opened or closed in one game does the same in the other. Drawers open and shut for both; a breakable box smashed by one disappears for the other (no pieces), and each of you gets its item. One-off interactions (the fridge, the van, the pot, switches) happen in both games (experimental). |
-| **Supplies** | Ammo, healing and crafting materials picked up by one player disappear for the other. Weapons, keys, files and maps stay for both, so nobody gets stuck; when one of you takes one, the other is told to pick it up too. |
+| **Supplies** | Each player gets their own ammo, healing and crafting materials. For a harder game, tick **Share supplies** (both of you): then there's one copy, and whatever one player picks up disappears for the other. Weapons, keys, files and maps always stay for both, so nobody gets stuck; when one of you takes one, the other is told to pick it up too. |
 | **Story** (experimental, off by default) | With **Share story** ticked, a cutscene or one of Jack's scripted moments that one of you starts also plays for the other when you're close together (same chapter, about 12 m). **VHS tapes:** when your friend puts one in, you follow them into it. |
 | **Deaths** | With your friend connected, a fatal hit puts you **down** instead of a game over, until your friend stands next to you for 3 seconds. |
 | **Pausing** | The other player sees "Your friend paused the game"; enemies your game was running carry on in theirs. |
@@ -111,6 +111,7 @@ the other sees "Your friend saved" so you can both save at the same point.
 | **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes or item boxes). Turn off if one ever does something odd. |
 | **Share pushed objects** (experimental) | On by default. Loose props one of you moves are moved in the other game too. |
 | **Share phone calls** | On by default. When one of you answers a phone, the other's phone is answered too (also when they get there later). Turn off if a call ever starts at a bad moment. |
+| **Share supplies** | Off by default: each of you gets your own ammo and healing. Tick it (both players) for a harder game with one copy for both: what one picks up disappears for the other. |
 
 **Help:**
 

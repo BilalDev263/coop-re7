@@ -1118,3 +1118,17 @@ Not synced / broken, as reported by the owner:
   developer tools -> Developer tools; the Script Generated UI debug panel only with developer tools), settings
   share_phones (checked on receipt of "intr ... phone") and dev_tools, coop_talk_hud() for the status line,
   fresh-list reminder 2 s after the friend (re)connects when list entries have a chapter > friend's. Sim: 26 checks.
+- Ladder (2026-11-03, in game): climbing has NO body clip. Layer 0 plays the turn trees (bank 0 ID 4/5 going up,
+  6/7 down, 9 at the top, 11 at the bottom; TurnL/TurnR/QuickTurn -1 frames) while the game moves the player,
+  0.3 m per 0.5 s. Ghost-side detection (|vy| > 0.35, horizontal < 0.6, 0.4 s) works; looping 443 ClimbWall-119cm
+  up / 407 Descend_Loop down looked wrong (owner), so LADDER_STAND_IN = false. Hit 620 + knock-back 702 seen on
+  layer 0 (shared since v0.19).
+- Unattached real gun (2026-11-03, 14:10): instantiating wp1210_Handgun_Item.pfb, NOT parented, its Motion/
+  MotionFsm/MotionManager/WeaponMotionController/MotionDelegateTagManager disabled, transform copied from the
+  ghost's hand each frame: the game FROZE (responding to Windows, no frames, log stopped except the DX12 re-hook
+  every 11 s). With the earlier parented test (T-pose, silent exit) this rules out real weapon instances on the
+  ghost. Shot sound/flash and the heal liquid need another route (e.g. the local player's own effect/sound
+  managers, or finding the Wwise event ids through via.wwise).
+- v0.22 (2026-11-03): settings.share_supplies (default off): apply_took and the pending-took loop only run when
+  on; the sender still sends "took", so each game follows its own player's choice. Ladder detection code ships
+  with LADDER_STAND_IN = false (log only).
