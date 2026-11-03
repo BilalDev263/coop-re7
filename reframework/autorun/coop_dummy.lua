@@ -1154,6 +1154,7 @@ function assemble_from(c)
             if go then
                 local off, lrot = local_offset(root, e.go)
                 parts[#parts + 1] = { go = go, holder = e.holder, mholder = e.mholder, path = e.path, state = "new",
+                    alts = e.alts,
                     mask = e.mask, mask_n = e.mask_n, src = e.src, off = off, lrot = lrot,
                     is_root = e.is_root, same_joints = e.same_joints, parent_joint = e.parent_joint }
                 log(string.format("  offset from root: %.3f %.3f %.3f  root=%s SameJointsConstraint=%s ParentJoint=%s",
@@ -1361,9 +1362,36 @@ re.on_frame(function()
             part.state = ok and "shown" or "failed"
             log("  part " .. part.path .. ": " .. (ok and "shown" or ("ERR " .. tostring(err))))
             part.vars_at = parts_frames + 30
+            part.alt_check_at = part.alts and parts_frames + 60 or nil
             if ok and part.is_root then
                 local aok, aerr = pcall(setup_animation, part)
                 if not aok then log("animation setup ERR " .. tostring(aerr)) end
+            end
+        end
+        -- Pieces with guessed file names (Joe's hands): a file that doesn't exist loads as a
+        -- mesh with no materials, so check after a second and try the next guess.
+        if part.state == "shown" and part.alt_check_at and parts_frames >= part.alt_check_at then
+            part.alt_check_at = nil
+            local nm = tonumber(safe(part.mesh.call, part.mesh, "get_MaterialNum") or 0) or 0
+            if nm > 0 then
+                log("  guessed piece found: " .. part.path)
+            else
+                part.alt_i = (part.alt_i or 0) + 1
+                local nxt = part.alts[part.alt_i]
+                if nxt and load_holders_global then
+                    local hok, h, mh = pcall(load_holders_global, nxt)
+                    if hok and h and mh then
+                        part.path = nxt .. ".mesh"
+                        pcall(part.mesh.call, part.mesh, "setMesh", h)
+                        pcall(part.mesh.call, part.mesh, "set_Material", mh)
+                        pcall(part.mesh.call, part.mesh, "set_Enabled", false)
+                        pcall(part.mesh.call, part.mesh, "set_Enabled", true)
+                        part.alt_check_at = parts_frames + 60
+                        log("  trying " .. nxt)
+                    end
+                else
+                    log("  no guess worked for " .. part.path .. "; piece left empty")
+                end
             end
         end
         -- Material instances exist only after the mesh is enabled; copy a bit later.
@@ -1676,10 +1704,14 @@ local function draw_connect_body()
     -- Story cutscenes and progress follow whichever player reaches them first.
     local sc, sv = imgui.checkbox("Share story (cutscenes and progress, experimental)", settings.share_story == true)
     if sc then settings.share_story = sv save_settings() end
+    local wc, wv = imgui.checkbox("Show your friend's weapon (experimental)", settings.show_weapon ~= false)
+    if wc then settings.show_weapon = wv save_settings() pcall(show_friend_weapon_again) end
     local tc, tv = imgui.checkbox("Follow my friend into VHS tapes", settings.follow_tapes ~= false)
     if tc then settings.follow_tapes = tv save_settings() end
     local ic, iv = imgui.checkbox("Share interactions (fridge, van, switches; experimental)", settings.share_interactions ~= false)
     if ic then settings.share_interactions = iv save_settings() end
+    local pc, pv = imgui.checkbox("Share pushed objects (chairs, bottles; experimental)", settings.share_physics ~= false)
+    if pc then settings.share_physics = pv save_settings() end
     if imgui.button("Teleport to my friend") then teleport_to_friend() end
 end
 
@@ -1845,11 +1877,18 @@ CHARACTERS = {
         ShadowHandL = { mesh = "ch8/" .. P .. "pl1000/pl1000/pl1020" },
         ShadowHandR = { mesh = "ch8/" .. P .. "pl1000/pl1000/pl1010" } } },
     -- Joe: the game's own files animate; the mod's stood in a T-pose, so he's left out of
-    -- MODDED. No hands yet (pl9010/pl9020 load empty).
-    { key = "joe", name = "Joe (DLC, no hands yet)", pieces = {
+    -- MODDED. His hands aren't at pl9000/pl9010 (loads empty); these are guesses, tried in
+    -- order until one loads with materials.
+    { key = "joe", name = "Joe (DLC)", pieces = {
         ShadowBody = { mesh = "ch9/" .. P .. "pl9000/pl9001/pl9001" },
         ShadowLowerBody = { mesh = "ch9/" .. P .. "pl9000/pl9002/pl9002" },
-        ShadowHead = { mesh = "ch9/" .. P .. "pl9000/pl9050/pl9050" } } },
+        ShadowHead = { mesh = "ch9/" .. P .. "pl9000/pl9050/pl9050" },
+        ShadowHandR = { mesh = "ch9/" .. P .. "pl9000/pl9010/pl9010", alts = {
+            "ch9/" .. P .. "pl9000/pl9000/pl9011", "ch9/" .. P .. "pl9000/pl9003/pl9003",
+            "ch9/" .. P .. "pl9000/pl9000/pl9030", "ch9/" .. P .. "pl9000/pl9030/pl9030" } },
+        ShadowHandL = { mesh = "ch9/" .. P .. "pl9000/pl9020/pl9020", alts = {
+            "ch9/" .. P .. "pl9000/pl9000/pl9021", "ch9/" .. P .. "pl9000/pl9004/pl9004",
+            "ch9/" .. P .. "pl9000/pl9000/pl9040", "ch9/" .. P .. "pl9000/pl9040/pl9040" } } } },
 }
 lobby = { friend_look = "default", sent_t = -100, sent_look = nil }
 
@@ -1887,6 +1926,8 @@ local function load_holders(mesh, mdf)
     return h, mh
 end
 
+load_holders_global = load_holders   -- for the guessed-piece retries in the parts loop
+
 -- Called by assemble_from with the local player's Shadow* pieces: dress them as the
 -- friend's chosen character. Each piece the character has replaces the local piece of
 -- the same name (a piece the local player lacks is added, borrowing the body's
@@ -1919,6 +1960,7 @@ function dress_as_friend_choice(shadow)
             local ok, h, mh = pcall(load_holders, pc.mesh, pc.mdf)
             if ok and h and mh then
                 e.holder, e.mholder, e.path = h, mh, pc.mesh .. ".mesh"
+                e.alts = pc.alts
                 e.src = nil   -- the material variables to copy belong to the local character
                 -- ...and so does the parts on/off pattern: Ethan's (parts 1, 10, 11 off) hid
                 -- Mia's eyes and chest and Zoe's feet. A dressed piece shows all its parts.
@@ -1947,7 +1989,123 @@ local function send_look()
 end
 
 -- Incoming "look" (coop_enemies.lua passes every event here first).
+-- The friend's weapon in their character's hand. Our side: the drawn weapon model under the
+-- player (GameObjects named wpNNNN...) goes out as "weapon <mesh> <mdf>" when it changes, "-"
+-- for none. Their side: the same model on a prefab instance hung on the right-hand weapon
+-- joint (R_Wep) of the friend's body. Untested (first build, 2026-11-03): "Show your friend's
+-- weapon" switches it off.
+held = { sent = nil, sent_t = -100, got = nil, part = nil }
+
+local function local_weapon()
+    local player = get_player()
+    if player == nil then return "-" end
+    -- Walk the player's children (no references kept: this runs every second).
+    local found = "-"
+    local function visit(go, depth)
+        if found ~= "-" or depth > 8 then return end
+        local name = tostring(safe(go.call, go, "get_Name") or "")
+        if name:match("^wp%d%d%d%d") and not name:find("Light") and safe(go.call, go, "get_Draw") then
+            local m = safe(go.call, go, "getComponent(System.Type)", sdk.typeof("via.render.Mesh"))
+            local h = m and safe(m.call, m, "getMesh")
+            local mh = m and safe(m.call, m, "get_Material")
+            local mp = h and safe(h.call, h, "get_ResourcePath")
+            local mdf = mh and safe(mh.call, mh, "get_ResourcePath")
+            if mp and mdf then
+                found = tostring(mp):gsub("%.mesh$", "") .. " " .. tostring(mdf):gsub("%.mdf2$", "")
+                held.local_go = go
+                return
+            end
+        end
+        local tr = safe(go.call, go, "get_Transform")
+        local child = tr and safe(tr.call, tr, "get_Child")
+        while child ~= nil and found == "-" do
+            local cgo = safe(child.call, child, "get_GameObject")
+            if cgo then visit(cgo, depth + 1) end
+            child = safe(child.call, child, "get_Next")
+        end
+    end
+    visit(player, 0)
+    return found
+end
+
+local function drop_held()
+    if held.part then
+        pcall(function() held.part:call("get_Transform"):call("set_Parent", nil) end)
+        pcall(held.part.call, held.part, "set_DrawSelf", false)
+        held.part = nil
+    end
+end
+
+local function show_held()
+    drop_held()
+    if held.got == nil or held.got == "-" or (settings and settings.show_weapon == false) then return end
+    local mesh, mdf = held.got:match("^(%S+) (%S+)$")
+    local root
+    for _, q in ipairs(parts) do if q.is_root then root = q end end
+    if mesh == nil or root == nil or prefab == nil then return end
+    local rp = root.go:call("get_Transform"):call("get_Position")
+    local go = prefab:call("instantiate(via.vec3)", rp)
+    if go == nil then return end
+    local h, mh = load_holders(mesh, mdf)
+    local m = go:call("getComponent(System.Type)", sdk.typeof("via.render.Mesh"))
+    go:call("set_DrawSelf", true)
+    go:call("set_UpdateSelf", true)
+    m:call("setMesh", h)
+    m:call("set_Material", mh)
+    m:call("set_DrawDefault", true)
+    m:call("set_Enabled", false)
+    m:call("set_Enabled", true)
+    local tr = go:call("get_Transform")
+    tr:call("set_Parent", root.go:call("get_Transform"))
+    tr:call("set_SameJointsConstraint", false)
+    tr:call("set_ParentJoint", "R_Wep")
+    tr:call("set_LocalPosition", Vector3f.new(0, 0, 0))
+    tr:call("set_LocalRotation", Quaternion.new(1, 0, 0, 0))
+    held.part = go
+    log("weapon: friend holds " .. mesh)
+end
+function show_friend_weapon_again() show_held() end
+
+re.on_frame(function()
+    local now = os.clock()
+    if now - (held.check_t or 0) < 1 then return end
+    held.check_t = now
+    local kv = net.kv or {}
+    if (kv.mode == "steam" or kv.mode == "bot") and coop_send_event then
+        local w = local_weapon()
+        if w ~= held.sent or now - held.sent_t > 20 then
+            if w ~= held.sent and w ~= "-" and held.local_go then
+                -- For weapon sounds later: what the held weapon is made of (logged once per weapon).
+                local names = {}
+                for _, c in ipairs(safe(function() return held.local_go:call("get_Components"):get_elements() end) or {}) do
+                    names[#names + 1] = c:get_type_definition():get_full_name()
+                end
+                log("weapon: holding " .. w .. "; components: " .. table.concat(names, ", "))
+            end
+            held.sent, held.sent_t = w, now
+            coop_send_event("weapon " .. w)
+        end
+    end
+    -- The friend's body was rebuilt (load, look change): put the weapon back, once per body.
+    local root
+    for _, q in ipairs(parts) do if q.is_root then root = q.go end end
+    if held.got and held.got ~= "-" and root and root ~= held.root_go then
+        held.root_go = root
+        held.part = nil   -- went with the old body
+        pcall(show_held)
+    end
+end)
+
 function coop_lobby_on_event(text)
+    local w = text:match("^weapon (.+)$")
+    if w then
+        if w ~= held.got then
+            held.got = w
+            local ok, err = pcall(show_held)
+            if not ok then log("weapon ERR " .. tostring(err)) end
+        end
+        return true
+    end
     local key = text:match("^look (%S+)")
     if key == nil then return false end
     if key ~= lobby.friend_look then
@@ -2575,6 +2733,40 @@ re.on_frame(function()
     end
 end)
 
+-- Nameplate with the distance; when the friend is off screen (behind a wall still counts
+-- as on screen), a pointer at the screen edge: "<" left, ">" right, "v" behind you.
+function friend_marker(name, p)
+    local player = get_player()
+    local pp = player and player:call("get_Transform"):call("get_Position")
+    local d = pp and math.sqrt((p.x - pp.x) ^ 2 + (p.y - pp.y) ^ 2 + (p.z - pp.z) ^ 2)
+    local label = d and string.format("%s  %d m", name, math.floor(d + 0.5)) or name
+    local head = Vector3f.new(p.x, p.y + 2.0, p.z)
+    local sok, sp = pcall(draw.world_to_screen, head)
+    if not sok then draw.world_text(label, head, 0xFFFFFFFF) return end   -- no projection: plain nameplate
+    local w, h = 1920, 1080
+    local ok, size = pcall(imgui.get_display_size)
+    if ok and size then w, h = size.x, size.y end
+    if sp and sp.x >= 0 and sp.x <= w and sp.y >= 0 and sp.y <= h then
+        draw.world_text(label, head, 0xFFFFFFFF)
+        return
+    end
+    if pp == nil or (settings and settings.hud == false) then return end
+    -- Which way to turn: the friend's direction against the player's facing (the right-hand
+    -- side is -X in RE7's local space).
+    local tr = player:call("get_Transform")
+    local f, x = tr:call("get_AxisZ"), tr:call("get_AxisX")
+    local vx, vz = p.x - pp.x, p.z - pp.z
+    local ahead = vx * f.x + vz * f.z
+    local right = -(vx * x.x + vz * x.z)
+    if ahead < 0 and math.abs(right) < -ahead then
+        draw.text("v " .. label .. " (behind you)", w / 2 - 80, h - 60, 0xFF7FE6FF)
+    elseif right > 0 then
+        draw.text(label .. " >", w - 220, h / 2, 0xFF7FE6FF)
+    else
+        draw.text("< " .. label, 20, h / 2, 0xFF7FE6FF)
+    end
+end
+
 re.on_frame(function()
     frames = frames + 1
     if phase == "wait" then
@@ -2676,7 +2868,7 @@ re.on_frame(function()
                 local kv = net.kv or {}
                 local name = (kv.mode == "bot") and (bot_test_name and BOT_TEST_NAME or "Bot")
                     or ((kv.peerName and kv.peerName ~= "") and kv.peerName or "Friend")
-                pcall(draw.world_text, name, Vector3f.new(p.x, p.y + 2.0, p.z), 0xFFFFFFFF)
+                pcall(friend_marker, name, p)
             end
             if frames % 120 == 0 then
                 fs.write("coop_dummy_state.txt", string.format("dummy: %.3f %.3f %.3f", p.x, p.y, p.z))

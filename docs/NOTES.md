@@ -1011,3 +1011,15 @@ Not synced / broken, as reported by the owner:
 - Not done: pushed physics props (app.Havok.RigidBodyDynamics, needs RigidBodySet calls seen in game), enemy
   flinch, weapon sounds, Joe's hands, Mia's gap/eyes, phone calls.
 - Version string 0.13; kit zip package/coop-re7-v0.13.zip (= coop-re7-friend-test.zip).
+- 2026-11-03: v0.13 published: publish commit 26d0bd5; pre-release https://github.com/xXCroissantXx/coop-re7/releases/tag/v0.13 (zip SHA-256 44087ad0...dd84987, download verified). Hub PR #320 describes v0.12 only.
+- v0.14 (built 2026-11-03, untested): shared-interaction name filter (save, tape, video, vhs, record, phone, tel,
+  itembox, box, event, cs_); friend_marker() (nameplate + distance; off-screen pointer at the edge, side from player
+  AxisZ / -AxisX); held weapon: our drawn wpNNNN GameObject under the player -> "weapon <mesh> <mdf>" event (every
+  change, re-sent every 20 s); the other game hangs a VrDummyPlayer prefab instance with that mesh on the root
+  part's joint R_Wep (SameJointsConstraint false). Option show_weapon. Version 0.14.
+- v0.15 (2026-11-03, untested): flinch(e, amount) in coop_enemies on_damage where our AI runs: ResistResultSet
+  (result Damaged 1, resistType Small 0 / Middle 1 for >= 200 damage, resistParts Chest 0) ->
+  requestDamageAction; logged once ("flinch <name>: requested"). Pushed props: app.Havok.RigidBodyDynamics keyed
+  name@initial pos, within 12 m, moves > 0.15 m sent as "phys" at <= 4 Hz; apply = disable(), set transform,
+  enable(); first 10 applies logged with before/wanted/now. Option share_physics. Joe hands: alts list,
+  checked by get_MaterialNum after ~60 frames, next guess loaded. Weapon components logged on weapon change.

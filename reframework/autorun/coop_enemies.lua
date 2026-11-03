@@ -204,16 +204,46 @@ end
 -- The friend hurt an enemy: take the same health off ours. setHealth rather than
 -- another hit, so the game doesn't scale it a second time. Never to 0 here: setting 0
 -- leaves a walking "dead" enemy; the friend's kill event follows and does it properly.
+-- Hit reaction for damage that came over the network. addManualDamage / addHitDamage play
+-- none (2026-11-01), so ask the enemy's action controller directly: requestDamageAction with
+-- a ResistResultSet. ResistResult Damaged = 1; resist type Small = 0 (Middle = 1 for big
+-- hits); body part Chest = 0. Untested in play.
+local RESIST_DAMAGED, RESIST_SMALL, RESIST_MIDDLE, PART_CHEST = 1, 0, 1, 0
+function flinch(e, amount)
+    if e.ac == nil then
+        for _, c in ipairs(e.go:call("get_Components"):get_elements()) do
+            if c:get_type_definition():is_a("app.EnemyActionController") then e.ac = c break end
+        end
+    end
+    if e.ac == nil then return "no action controller" end
+    if e.ac:call("get_isForbidDamageReaction") then return "reactions forbidden right now" end
+    local rs = sdk.create_instance("app.EnemyActionController.ResistResultSet")
+    if rs == nil then return "no ResistResultSet" end
+    pcall(rs.call, rs, ".ctor")
+    rs:set_field("result", RESIST_DAMAGED)
+    rs:set_field("resistType", (amount or 0) >= 200 and RESIST_MIDDLE or RESIST_SMALL)
+    rs:set_field("resistParts", PART_CHEST)
+    rs:set_field("hasBlownaway", false)
+    e.ac:call("requestDamageAction(app.EnemyActionController.ResistResultSet)", rs)
+    return "requested"
+end
+
 local function on_damage(id, ch, amount, name)
     if ch ~= chapter() then return end
     local e = find_tracked(id)
     if e == nil or e.dead or safe(e.go.call, e.go, "get_Update") ~= true then return end
     local hp = e.dc:call("get_health") or 0
     local new = math.max(hp - amount, 1.0)
-    -- No flinch: neither addManualDamage nor addHitDamage (even with Stun, PriorityMax and
-    -- a body part set) plays a hit reaction; those come from the collision pipeline.
     e.dc:call("setHealth(System.Single, System.Single)", new, e.dc:call("get_maxHealth"))
     e.hp = e.dc:call("get_health")
+    -- The reaction plays only where the enemy's AI runs; a copy follows its owner's clip.
+    if em_move == nil or em_move.own[id] ~= "peer" then
+        local ok, res = pcall(flinch, e, amount)
+        if not es.flinch_logged or not ok then
+            es.flinch_logged = true
+            log("flinch " .. name .. ": " .. (ok and tostring(res) or ("ERR " .. tostring(res))))
+        end
+    end
     es.applied_dmg = (es.applied_dmg or 0) + 1
     log(string.format("friend hit %s for %.0f: %.0f -> %.0f", name, amount, hp, e.hp))
 end

@@ -9,6 +9,7 @@
 --   drawer <id> <0|1> <chapter> a drawer (app.InteractDrawer) was shut / pulled open
 --   intr <id> <chapter>         a one-off interaction (fridge, van, pot...) was completed
 --   switch <id> <0|1> <chapter> a switch (app.InteractSwitch) was turned off / on
+--   phys <key> <x y z> <qw qx qy qz> <chapter>  a loose physics prop (chair...) moved
 -- Doors (app.DoorPush) and items (app.Item) carry SaveGUID, saved in the level, so the id
 -- is the same on both PCs. Supplies (ammo, healing, materials, weapons) picked up by one
 -- player vanish for the other (Item.disableFromScene); key items, files and maps stay in
@@ -239,6 +240,15 @@ local PROP_TYPES = {
         state = function(c) return c:get_field("NowSwitchOn") == true end },
 }
 local function interactions_shared() return not (settings and settings.share_interactions == false) end
+-- Never share these: saving (tape recorders), VHS tapes (followed separately), phones, item
+-- boxes, cutscene triggers. Matched on the interactable's GameObject name.
+local INTR_SKIP = { "save", "tape", "video", "vhs", "record", "phone", "tel", "itembox", "box", "event", "cs_" }
+local function intr_allowed(c)
+    local go = safe(c.call, c, "get_GameObject")
+    local name = (go and tostring(safe(go.call, go, "get_Name") or "") or ""):lower()
+    for _, w in ipairs(INTR_SKIP) do if name:find(w, 1, true) then return false end end
+    return true
+end
 
 local function refresh_props()
     local sc = scene()
@@ -267,7 +277,8 @@ local function poll_props(now)
         if on ~= s.on and not ours then
             if s.kind == "box" and on then send(string.format("break %s %d", s.id, chapter()))
             elseif s.kind == "drawer" then send(string.format("drawer %s %d %d", s.id, on and 1 or 0, chapter()))
-            elseif s.kind == "intr" and on and interactions_shared() then send(string.format("intr %s %d", s.id, chapter()))
+            elseif s.kind == "intr" and on and interactions_shared() and intr_allowed(s.c) then
+                send(string.format("intr %s %d", s.id, chapter()))
             elseif s.kind == "switch" and interactions_shared() then
                 send(string.format("switch %s %d %d", s.id, on and 1 or 0, chapter()))
             end
@@ -299,6 +310,7 @@ local function apply_prop(kind, id, want, ch)
         end
         note("your friend smashed a box")
     elseif kind == "intr" then
+        if not intr_allowed(s.c) then log("intr " .. id .. ": not shared here (save, tape, phone...)") return end
         ok, err = pcall(s.c.call, s.c, "successInteract")
         note("your friend used something here (" .. tostring(safe(function() return s.c:call("get_GameObject"):call("get_Name") end)) .. ")")
     elseif kind == "switch" then
@@ -311,6 +323,82 @@ local function apply_prop(kind, id, want, ch)
     log(string.format("%s %s: %s -> %s%s", kind, id, tostring(before), tostring(safe(s.pt.state, s.c)),
         ok and "" or (" ERR " .. tostring(err))))
     ws.applied = ws.applied + 1
+end
+
+-- Loose physics props ----------------------------------------------------------------
+-- Chairs, bottles and the like (app.Havok.RigidBodyDynamics) have no SaveGUID; both games
+-- load them at the same spot, so the key is the GameObject name plus where it was first
+-- seen. Props within 12 m that moved are sent up to 4 times a second; the other game
+-- re-places its copy (physics off, move, physics on). Untested (first build, 2026-11-03):
+-- "Share pushed objects" switches it off, and the first moves are logged in detail.
+ws.phys = {}            -- key -> { c, go, last = {x,y,z}, sent_t }
+ws.phys_t, ws.phys_logged = -100, 0
+local PHYS_NEAR, PHYS_MOVE = 12, 0.15
+local function phys_shared() return not (settings and settings.share_physics == false) end
+
+local function refresh_phys()
+    local sc = scene()
+    local arr = sc and safe(sc.call, sc, "findComponents(System.Type)", sdk.typeof("app.Havok.RigidBodyDynamics"))
+    local seen = {}
+    for _, c in ipairs(arr and arr:get_elements() or {}) do
+        local go = safe(c.call, c, "get_GameObject")
+        ws.phys_by_addr = ws.phys_by_addr or {}
+        local known = ws.phys_by_addr[c:get_address()]
+        if known and ws.phys[known] then seen[known] = true
+        elseif go then
+            local p = go:call("get_Transform"):call("get_Position")
+            local key = string.format("%s@%.1f,%.1f,%.1f", tostring(go:call("get_Name")), p.x, p.y, p.z)
+            if ws.phys[key] == nil then
+                ws.phys[key] = { key = key, c = c, go = go, last = { x = p.x, y = p.y, z = p.z }, sent_t = -100 }
+            end
+            ws.phys_by_addr[c:get_address()] = key
+            seen[key] = true
+        end
+    end
+    for key in pairs(ws.phys) do if not seen[key] then ws.phys[key] = nil end end
+end
+
+local function poll_phys(now)
+    if not phys_shared() then return end
+    local player = sdk.get_managed_singleton("app.ObjectManager"):get_field("PlayerObj")
+    if player == nil then return end
+    local pp = player:call("get_Transform"):call("get_Position")
+    for key, s in pairs(ws.phys) do
+        local tr = safe(s.go.call, s.go, "get_Transform")
+        local p = tr and safe(tr.call, tr, "get_Position")
+        if p and (p.x - pp.x) ^ 2 + (p.z - pp.z) ^ 2 < PHYS_NEAR * PHYS_NEAR then
+            local moved = math.sqrt((p.x - s.last.x) ^ 2 + (p.y - s.last.y) ^ 2 + (p.z - s.last.z) ^ 2)
+            local ours = ws.applying["phys:" .. key] and now - ws.applying["phys:" .. key] < 2
+            if moved > PHYS_MOVE and not ours and now - s.sent_t > 0.25 then
+                local q = tr:call("get_Rotation")
+                s.last, s.sent_t = { x = p.x, y = p.y, z = p.z }, now
+                send(string.format("phys %s %.3f %.3f %.3f %.4f %.4f %.4f %.4f %d", key, p.x, p.y, p.z,
+                    q.w, q.x, q.y, q.z, chapter()))
+            elseif ours then
+                s.last = { x = p.x, y = p.y, z = p.z }
+            end
+        end
+    end
+end
+
+local function apply_phys(key, x, y, z, qw, qx, qy, qz, ch)
+    if ch ~= chapter() or not phys_shared() then return end
+    local s = ws.phys[key]
+    if s == nil then return end
+    ws.applying["phys:" .. key] = os.clock()
+    local tr = s.go:call("get_Transform")
+    local before = tr:call("get_Position")
+    pcall(s.c.call, s.c, "disable")
+    tr:call("set_Position", Vector3f.new(x, y, z))
+    tr:call("set_Rotation", Quaternion.new(qw, qx, qy, qz))
+    pcall(s.c.call, s.c, "enable")
+    s.last = { x = x, y = y, z = z }
+    if ws.phys_logged < 10 then
+        ws.phys_logged = ws.phys_logged + 1
+        local after = tr:call("get_Position")
+        log(string.format("phys %s: %.2f %.2f %.2f -> wanted %.2f %.2f %.2f, now %.2f %.2f %.2f", key,
+            before.x, before.y, before.z, x, y, z, after.x, after.y, after.z))
+    end
 end
 
 -- Incoming events (called by coop_enemies.lua). Returns true if it was ours.
@@ -342,6 +430,13 @@ function coop_world_on_event(text)
         end
         return true
     end
+    local pk, px, py, pz, pqw, pqx, pqy, pqz, pch =
+        text:match("^phys (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%-?%d+)")
+    if pk then
+        pcall(apply_phys, pk, tonumber(px), tonumber(py), tonumber(pz), tonumber(pqw), tonumber(pqx),
+            tonumber(pqy), tonumber(pqz), tonumber(pch))
+        return true
+    end
     local tid, tch, tname = text:match("^took (%S+) (%-?%d+) (%S+)")
     if tid then pcall(apply_took, tid, tonumber(tch), tname) return true end
     return false
@@ -358,6 +453,8 @@ re.on_frame(function()
         ws.props_t = now
         local ok, err = pcall(refresh_props)
         if not ok and not ws.prop_err then ws.prop_err = true log("props ERR " .. tostring(err)) end
+        local fok, ferr = pcall(refresh_phys)
+        if not fok and not ws.phys_err then ws.phys_err = true log("phys ERR " .. tostring(ferr)) end
     end
     if now - ws.items_t > 2 then
         ws.items_t = now
@@ -368,6 +465,8 @@ re.on_frame(function()
         ws.poll_t = now
         local ok, err = pcall(poll_doors, now)
         if not ok and not ws.poll_err then ws.poll_err = true log("door poll ERR " .. tostring(err)) end
+        local fpok, fperr = pcall(poll_phys, now)
+        if not fpok and not ws.phys_poll_err then ws.phys_poll_err = true log("phys poll ERR " .. tostring(fperr)) end
         local pok, perr = pcall(poll_props, now)
         if not pok and not ws.ppoll_err then ws.ppoll_err = true log("prop poll ERR " .. tostring(perr)) end
         local iok, ierr = pcall(poll_items, now)

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.15 (2026-11-03)
+First attempts at the remaining gaps; all untested in play, each with a way to see what happened in the logs:
+- **Enemies flinch from your friend's hits**: the enemy's own hit reaction is requested when your friend's damage
+  arrives (a bigger reaction for big hits).
+- **Pushed objects** (experimental, option *Share pushed objects*): chairs, bottles and other loose props you
+  knock around move in your friend's game too.
+- **Joe's hands**: a few likely hand files are tried in turn until one loads.
+- Weapon sounds: the log now records what each weapon you hold is made of, to build sound sharing on next.
+
+## v0.14 (2026-11-03)
+- **Your friend's weapon in their hand** (experimental, option *Show your friend's weapon*): the weapon your
+  character holds is shown in your character's right hand on your friend's screen. Untested: tell us what you see.
+- **Friend marker**: the nameplate shows how far away your friend is, and when they're off screen a pointer at
+  the edge of the screen shows which way to turn (or "behind you").
+- **Safer shared interactions**: saving (tape recorders), VHS tapes, phones and item boxes are never shared.
+- Works together with v0.13 (only the weapon needs v0.14 on both sides).
+
 ## v0.13 (2026-11-03)
 - **More of your friend's moves show**: every move RE7 plays on your body is now mirrored, not just blocking:
   anything on the upper-body and hand layers (weapon swings and shots if RE7 plays them there) and full-body
