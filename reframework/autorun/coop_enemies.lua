@@ -154,6 +154,7 @@ local function send_event(text)
     fs.write("coopnet_ev_out.txt", table.concat(es.ev_out, "\n") .. "\n")
     es.sent = es.sent + 1
     log("sent: " .. text)
+    if coop_talk_record then pcall(coop_talk_record, text) end   -- the catch-up list (coop_talk.lua)
 end
 
 -- Shared with coop_world.lua (doors and items): one event file, one id sequence.
@@ -291,6 +292,9 @@ local function on_damage(id, ch, amount, name)
 end
 
 local function on_event(text)
+    -- Catch-up batches and quick messages belong to coop_talk.lua (a catch-up batch is
+    -- unpacked there and each change comes back through coop_apply_event).
+    if coop_talk_on_event and coop_talk_on_event(text) then return end
     -- Character looks belong to coop_dummy.lua's lobby; doors and items to coop_world.lua.
     if coop_lobby_on_event and coop_lobby_on_event(text) then return end
     if coop_world_on_event and coop_world_on_event(text) then return end
@@ -327,6 +331,8 @@ local function on_event(text)
         log("friend downed " .. name .. ", not active here: ignored")
     end
 end
+
+function coop_apply_event(text) on_event(text) end
 
 local function read_events()
     local text = fs.read("coopnet_ev_in.txt")

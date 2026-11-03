@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.19 (2026-11-03)
+Both players need v0.19. Tested with the bot: quick messages, pings, health and the catch-up button work; the rest was tested offline (a simulated game, 21 checks).
+- **Catching up after a rejoin**: each game keeps a list of the lasting changes it made (doors unlocked, boxes
+  smashed, drawers, switches, supplies taken, Molded killed), on disk for 12 hours. When your friend connects or
+  comes back after a gap (a restart, a crash, a dropped connection), the list is sent and their game catches up,
+  including what you did while they were away. Areas they haven't reached yet catch up when they get there.
+  **Catch up now** in the new *Talk and catch up* section does it on demand, both ways; **Start a fresh list**
+  is for starting a new game together. (The first two-player session went "totally out of sync" after a rejoin.)
+- **Quick messages and pings**: **F5** ping ("Over here"), **F6** Come here, **F7** Wait for me, **F8** Help!
+  (or the buttons in *Talk and catch up*, plus "Go on ahead"). Your friend sees the message at the top of the
+  screen with the distance, and for pings, Come here and Help, a marker where you stood (a pointer at the edge
+  when it's off screen) for 25 seconds. The keys can be switched off.
+- **Your friend's health** on the status line and their nameplate, green, yellow or red.
+- **More of your friend's moves show**: climbing up and dropping down ledges, crawling, getting hit, knock-backs
+  and enemy grabs (full-body moves were only shared from motion number 1000 up, which left these out).
+- **Items in hand**: the healing bottle (and other items your friend holds, like one they're inspecting) shows
+  in their hand, not just weapons. The healing animation itself is retried in the item animation set when the
+  friend's current set doesn't have it (untested).
+- Ladders: their animation comes from another animation set the movement update can't carry yet; the log now
+  records it, so a later version can add it.
+- Testing: the bot echoes quick messages and catch-up lists, so they can be tried alone.
+- The two-player checklist (TWO-PLAYER-TEST.md) is rewritten for a play-through from the start.
+
 ## v0.18 (2026-11-03)
 Fixes from a solo run through Jack's garage fight; not yet tested between two players. Both players need v0.18.
 - **Boss mode now covers Jack's garage fight.** The garage Jack is the same enemy as the stalker Jack, so the

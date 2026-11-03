@@ -1080,3 +1080,22 @@ Not synced / broken, as reported by the owner:
 - With the handgun set (TargetBankType 100) the walk ID 20 binds the handgun's 284-frame clip; verify_playback
   called it a bad bind and rebuilt the whole ghost (12:57:32). Length check and full rebuild now skipped while a
   weapon set is on.
+- v0.19 (offline, 2026-11-03): coop_talk.lua. Catch-up list of lasting outgoing events (unlock/break/drawer/
+  switch/took, kill of Em4xxx), deduped by kind:id, on disk (coop_catchup.txt, 12 h, per friend), sent as
+  "catchup a|b|..." batches of 20 every 0.5 s (coopnet_ev_out keeps 30 lines) on first connect, after an 8 s+
+  gap, on "catchup_req" and on the button; received batches go through coop_apply_event -> on_event, so the
+  pending paths handle unloaded areas. Quick messages "talk <kind> <ch> <x y z>" on F5-F8 (edge-triggered
+  reframework:is_key_down) with on-screen message and marker; "hp <pct>" on 5-point changes. Simulated with
+  lupa (local/build/sim_talk.py, 21 checks): it caught a nil "hp" upvalue (state declared below its user).
+- Solo log review (2026-11-03): heal at 12:43:19 played 2790 on layer 1 (knife set 30) while "weapon -" was
+  sent: the bottle isn't wpNNNN. local_weapon now also takes drawn player children with app.Item (not Shadow*,
+  not *Light*); grip carries the parent joint as an 8th field. The ladder after Jack's defeat sent no action:
+  climb/descend/landing are layer-0 IDs 300-499 and hits 600-999 (all < 1000, the old layer-0 threshold);
+  crouch walk is 40-48. Layer 0 now sends from 100 up. No "Ladder" clip in the pl0000 banks: any non-0/1 bank
+  clip is logged once ("action not shared (bank N)"). Puzzle piece = EntranceHallKey "got" at 12:48:25 (key: as designed).
+- v0.19 bot check (2026-11-03): F5/F6/F8 messages and markers shown, health on nameplate and status, Catch up now
+  sent 1 change (drawer) and the echo applied it. Bottle shown in the bot's hand (Props/sm1852_AntisepticSolution
+  Medium) but heal clip 2790 bound nothing on the ghost in set 0 (player probe during idle: TargetBankType 0,
+  no dynamic banks; the heal itself wasn't caught). Fallback: unbound action after 0.15 s retried in set 200.
+  Bot walks through closed doors: the bot sends no door events (real friends do). Transient slide 13:18:04:
+  walk layer froze, full rebuild after ~6 s (old watchdog path).

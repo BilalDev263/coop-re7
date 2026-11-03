@@ -379,8 +379,12 @@ function coop_ghost() return dummy end
 -- chapter field (chapter + 256 * motion ID); the friend's Ethan plays it on its own layer 1
 -- with the same mask and blend mode. Layer-0 walking is left to the ghost's own picker.
 -- Every layer is checked: upper-body and hand layers first (4, 1, 2, 3, 5, 6, 7), then a
--- full-body action on layer 0 (ladders, interactions: any clip from ID 1000 up, since the
--- walk set uses low IDs). Weapon banks also report BankID 0; bank 1 is camera-only.
+-- full-body action on layer 0: any clip from ID 100 up (0-99 is standing locomotion, which the
+-- ghost picks itself; 100-299 crawling and lying, 300-499 climbing, dropping down and
+-- landings, 600-999 hits, knock-backs, deaths and grabs, 1000+ interactions). It was 1000 up
+-- until v0.19, which hid climbing and hits. Weapon banks also report BankID 0; bank 1 is
+-- camera-only. Clips from any other bank can't be sent (the packet has no room for the bank):
+-- each one is logged once, to find what the ladder uses.
 -- The packet field is chapter + 256 * motion ID + 2^24 * layer.
 ACTION_LAYERS = { 4, 1, 2, 3, 5, 6, 7, 0 }
 local act = { motion = nil, motion_go = nil }
@@ -398,7 +402,15 @@ function local_action_clip(player)
             if L then
                 local bank = safe(L.call, L, "get_MotionBankID")
                 local id = tonumber(safe(L.call, L, "get_MotionID") or 0xFFFFFFFF) or 0xFFFFFFFF
-                if bank == 0 and id >= 1000 and id < 65536 then return id, li end
+                if bank == 0 and id >= (li == 0 and 100 or 1000) and id < 65536 then return id, li end
+                if bank ~= nil and bank ~= 0 and bank ~= 1 and id < 0xFFFFFFFF then
+                    act.unshared = act.unshared or {}
+                    local k = li .. "/" .. tostring(bank) .. "/" .. id
+                    if not act.unshared[k] then
+                        act.unshared[k] = true
+                        log(string.format("action not shared (bank %s): layer %d motion %d", tostring(bank), li, id))
+                    end
+                end
             end
         end
     end
@@ -954,6 +966,19 @@ local function own_layer_setup(li)
     return safe(L.call, L, "get_JointMaskID"), safe(L.call, L, "get_BlendMode")
 end
 
+-- Item uses (healing) play clips the friend's weapon set doesn't hold (2790 bound nothing on
+-- sets 0 and 30, 2026-11-03): a clip still unbound 0.15 s after starting is retried once in
+-- the item set, which then stays on until that move ends.
+local ITEM_SET = 200
+local function start_clip(L, want)
+    local n = #(anim.change:get_param_types() or {})
+    if n == 6 then
+        pcall(anim.change.call, anim.change, L, 0, want, 0.0, 6.0, 2, 0)
+    else
+        pcall(anim.change.call, anim.change, L, 0, want, 0.0, 6.0)
+    end
+end
+
 function ghost_action()
     if not anim.ready or anim.motion == nil or anim.change == nil then return end
     -- test_action: set from a probe (bot tests); forced_action: coop_revive's lying-down pose.
@@ -965,7 +990,7 @@ function ghost_action()
     -- TargetBankType picks the set (0 hands, 30 knife, 100 handgun...), as on the friend's
     -- body. It must stay set while the clip plays: the clip binds a frame later (switching
     -- back right after changeMotion bound nothing). Walk and idle stay the same clips.
-    local bank = (not net.test_action and not net.forced_action and held and held.bank_got) or 0
+    local bank = anim.bank_override or (not net.test_action and not net.forced_action and held and held.bank_got) or 0
     if bank ~= anim.bank or tonumber(safe(m.call, m, "get_TargetBankType")) ~= bank then
         anim.bank = bank
         safe(m.call, m, "set_TargetBankType", bank)
@@ -978,7 +1003,26 @@ function ghost_action()
     end
     -- (Tried 2026-11-03: merging 2002 into 2001 and fading the layer in/out over 0.15 s made
     -- swings stop matching; the plain snap below looked better.)
-    if want == (anim.action or 0) then return end
+    if want == (anim.action or 0) then
+        if want ~= 0 and anim.retry_at and os.clock() >= anim.retry_at then
+            anim.retry_at = nil
+            local L = safe(m.call, m, "getLayer", 1)
+            if L and (tonumber(safe(L.call, L, "get_EndFrame")) or 0) <= 0 and bank ~= ITEM_SET then
+                anim.bank_override, anim.bank = ITEM_SET, ITEM_SET
+                safe(m.call, m, "set_TargetBankType", ITEM_SET)
+                start_clip(L, want)
+                log(string.format("action: motion %d had no clip in set %d, retrying in the item set", want, bank))
+            end
+        end
+        return
+    end
+    if anim.bank_override then
+        -- A new move: back to the friend's own set.
+        anim.bank_override = nil
+        bank = (not net.test_action and not net.forced_action and held and held.bank_got) or 0
+        anim.bank = bank
+        safe(m.call, m, "set_TargetBankType", bank)
+    end
     if (tonumber(safe(m.call, m, "getLayerCount") or 0) or 0) < 2 then
         safe(m.call, m, "setLayerCount", 2)
         if safe(m.call, m, "getLayer", 1) == nil then
@@ -999,12 +1043,8 @@ function ghost_action()
     if mask then safe(L.call, L, "set_JointMaskID", mask) end
     if mode then safe(L.call, L, "set_BlendMode", mode) end
     safe(L.call, L, "set_Resource", nil)
-    local n = #(anim.change:get_param_types() or {})
-    if n == 6 then
-        pcall(anim.change.call, anim.change, L, 0, want, 0.0, 6.0, 2, 0)
-    else
-        pcall(anim.change.call, anim.change, L, 0, want, 0.0, 6.0)
-    end
+    start_clip(L, want)
+    anim.retry_at = os.clock() + 0.15
     safe(L.call, L, "set_Speed", 1.0)
     safe(L.call, L, "set_BlendRate", 1.0)
     log(string.format("action: friend plays motion %d from layer %d (mask %s, mode %s, set %d, length %s)", want,
@@ -2031,7 +2071,13 @@ local function local_weapon()
     local function visit(go, depth)
         if found ~= "-" or depth > 8 then return end
         local name = tostring(safe(go.call, go, "get_Name") or "")
-        if name:match("^wp%d%d%d%d") and not name:find("Light") and safe(go.call, go, "get_Draw") then
+        -- Weapons (wpNNNN), and any other game item drawn in a hand: the healing bottle had
+        -- no wp name, so the friend's heal showed an empty hand (2026-11-03). Ethan's own
+        -- Shadow* body pieces have no app.Item.
+        local is_wp = name:match("^wp%d%d%d%d") and not name:find("Light")
+        local is_item = not is_wp and depth > 0 and not name:match("^Shadow") and not name:find("Light") and
+            safe(go.call, go, "getComponent(System.Type)", sdk.typeof("app.Item")) ~= nil
+        if (is_wp or is_item) and safe(go.call, go, "get_Draw") then
             local m = safe(go.call, go, "getComponent(System.Type)", sdk.typeof("via.render.Mesh"))
             local h = m and safe(m.call, m, "getMesh")
             local mh = m and safe(m.call, m, "get_Material")
@@ -2067,6 +2113,7 @@ function apply_grip()
     if held.part == nil then return end
     local g = held.grip or { 0, 0, 0, 1, 0, 0, 0 }
     local tr = held.part:call("get_Transform")
+    if g.joint and g.joint ~= tr:call("get_ParentJoint") then tr:call("set_ParentJoint", g.joint) end
     tr:call("set_LocalPosition", Vector3f.new(g[1], g[2], g[3]))
     tr:call("set_LocalRotation", Quaternion.new(g[4], g[5], g[6], g[7]))
 end
@@ -2126,7 +2173,10 @@ re.on_frame(function()
         local lp = tr and safe(tr.call, tr, "get_LocalPosition")
         local lq = tr and safe(tr.call, tr, "get_LocalRotation")
         if lp and lq then
-            local g = string.format("%.3f %.3f %.3f %.4f %.4f %.4f %.4f", lp.x, lp.y, lp.z, lq.w, lq.x, lq.y, lq.z)
+            -- The joint goes last: a v0.16-v0.18 receiver reads the first 7 numbers and ignores it.
+            local joint = tostring(safe(tr.call, tr, "get_ParentJoint") or "R_Wep")
+            if joint == "" then joint = "R_Wep" end
+            local g = string.format("%.3f %.3f %.3f %.4f %.4f %.4f %.4f %s", lp.x, lp.y, lp.z, lq.w, lq.x, lq.y, lq.z, joint)
             if g ~= held.grip_sent then
                 held.grip_sent = g
                 coop_send_event("grip " .. g)
@@ -2169,7 +2219,10 @@ function coop_lobby_on_event(text)
     local grip = text:match("^grip (.+)$")
     if grip then
         local g = {}
-        for n in grip:gmatch("%S+") do g[#g + 1] = tonumber(n) end
+        for n in grip:gmatch("%S+") do
+            local v = tonumber(n)
+            if v then g[#g + 1] = v else g.joint = n end
+        end
         if #g == 7 then
             held.grip = g
             pcall(apply_grip)
@@ -2402,6 +2455,7 @@ re.on_draw_ui(function()
         local ok, err = pcall(function()
             imgui.text("Status: " .. connection_text())
             section("Lobby", draw_lobby)
+            if coop_talk_ui then section("Talk and catch up", coop_talk_ui) end
             section("Connect, saving and display", draw_connect_body)
             section("Testing", draw_testing)
             imgui.text("Advanced and debug controls: Script Generated UI > coop_dummy (ghost body test)")
@@ -2955,6 +3009,8 @@ re.on_frame(function()
                 local kv = net.kv or {}
                 local name = (kv.mode == "bot") and (bot_test_name and BOT_TEST_NAME or "Bot")
                     or ((kv.peerName and kv.peerName ~= "") and kv.peerName or "Friend")
+                local fhp = coop_friend_health and coop_friend_health()
+                if fhp then name = string.format("%s (%d%%)", name, fhp) end
                 pcall(friend_marker, name, p)
             end
             if frames % 120 == 0 then
@@ -3157,6 +3213,10 @@ local function hud_lines()
         out[#out + 1] = { "Co-op: connected to " .. who .. ping, 0xFF7FFF8C }
     else
         out[#out + 1] = { "Co-op: waiting for your friend...", 0xFF7FE6FF }
+    end
+    local fhp = fresh and coop_friend_health and coop_friend_health()
+    if fhp then
+        out[#out + 1] = { string.format("Friend's health: %d%%", fhp), coop_friend_health_color(fhp) }
     end
     local inv = pending_invite and pending_invite()
     if inv then

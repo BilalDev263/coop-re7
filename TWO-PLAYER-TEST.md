@@ -1,4 +1,4 @@
-# coop-re7: first two-player session checklist
+# coop-re7: two-player session checklist
 
 Everything in coop-re7 has so far been tested on one PC against a simulated player (the bot). This list walks
 two real players through every shared feature once, so problems show up in a known order. It takes about
@@ -7,7 +7,9 @@ two real players through every shared feature once, so problems show up in a kno
 **Before you start (both players)**
 
 - [ ] Both installed the same coop-re7 release (the friend list warns if your versions differ).
-- [ ] *Allow saving* **off** for this session (the default). Nothing you do will be saved.
+- [ ] *Allow saving*: off by default (nothing kept). To keep your progress, both tick it before playing.
+- [ ] A player starting RE7 for the first time plays the opening alone first (joining during it leaves a black
+      screen), then connects.
 - [ ] Voice chat open (Discord or Steam) so you can say what you see.
 
 ## 1. Connect (5 min)
@@ -64,27 +66,34 @@ Jack appears soon after dinner. Saving is off, so getting hurt costs nothing.
       come back to Player A within 3 seconds.
 - [ ] Player B starts again and reconnects. A sees B again.
 
-## 8. New in v0.12 (10 min)
+## 8. New since the first session (v0.12-v0.19), in the order you'll meet them
 
-- [ ] **Lobby**: each player picks a character under *You appear to your friend as*. The other sees the change
-      within a few seconds.
-- [ ] **Blocking**: A blocks while B watches; B sees A's arms come up (also while walking).
+Playing from the start of the game. Note for each: works / doesn't / looks odd.
+
+- [ ] **Talk** (new): A presses **F6** (Come here). B sees "Your friend: Come here (*n* m)" at the top of the
+      screen and a marker where A stood. Try **F5** (ping), **F7** (wait), **F8** (help).
+- [ ] **Health** (new): the status line and nameplate show the other player's health (green, yellow, red).
+- [ ] **Lobby**: each picks a character; the other sees the change within a few seconds.
 - [ ] **Doors**: A opens a door and lets it close; it opens and closes on B's screen too.
-- [ ] **Drawers and boxes**: A opens a drawer, then smashes a breakable box; both show on B's screen.
-- [ ] **Pausing**: A opens the pause menu near an enemy. B sees "Your friend paused the game" and the enemy keeps
-      moving for B.
-- [ ] **Enemy hand-off**: B walks clearly closer to an enemy A was nearer to. It keeps moving smoothly on both
-      screens (no flicker) and goes after B.
-- [ ] **Weapons**: A swings the knife and shoots. Does B see it? (Not expected yet; tell us either way.)
-
-## 9. New in v0.13 (10 min)
-
-- [ ] **Moves**: A swings a weapon, shoots, climbs a ladder, pushes a door. Which of these does B see?
-- [ ] **Downed**: A takes a fatal hit. B sees A lying on the floor, walks over, A gets up.
-- [ ] **VHS tape**: A puts a tape in (B nearby, same chapter). B's game follows into the tape a few seconds later.
-- [ ] **Interactions**: A opens the fridge or the van, or flips a switch. Does it happen in B's game?
+- [ ] **Interactions**: A opens the van or the fridge, stirs the pot, flips a switch. Does it happen for B?
+- [ ] **Drawers and boxes**: A opens a drawer; A smashes a breakable box. On B's screen the box disappears and
+      its item lies where it stood. **Both** can pick up an item from it.
+- [ ] **Pushed objects**: A knocks a chair or bottle around. Does it move for B?
+- [ ] **Supplies**: A picks up ammo. It disappears for B. Then A walks into another area and back: B's other
+      supplies must still be there (the v0.17 fix).
 - [ ] **Keys**: A picks up a key. B is told to pick it up too, and it's still there for B.
-- [ ] **Jack** (Share story on, close together): Jack's scripted moments happen on both screens.
+- [ ] **VHS tape**: A puts a tape in (B nearby). B's game follows into the tape a few seconds later.
+- [ ] **Moves**: A blocks, swings the knife, aims and shoots the handgun, climbs a ladder. Which does B see?
+      (Gunshot sound and muzzle flash aren't expected yet.)
+- [ ] **Enemies**: A hits Jack or a Molded. On B's screen it loses health and flinches. Walk closer to it one at
+      a time: it should keep moving smoothly and go after the nearer player.
+- [ ] **Pausing**: A pauses near an enemy. B sees "Your friend paused the game"; the enemy keeps moving for B.
+- [ ] **Downed**: A takes a fatal hit and lies on the floor; B walks over and A gets up.
+- [ ] **Garage fight (boss mode)**: each player gets the whole fight in their own game. Jack's hits by one player
+      count for both, and when he goes down for one, he goes down for both.
+- [ ] **Rejoin catch-up** (new): B quits the game while A carries on (unlock a door, smash a box, take a herb).
+      B starts again and reconnects. Within a few seconds B sees "Caught up with *n* changes from your friend",
+      and A's changes are there in B's world.
 
 ## Afterwards
 

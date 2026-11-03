@@ -1,4 +1,4 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.18)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.19)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
 or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
@@ -22,6 +22,8 @@ over Steam (no port forwarding).
 | **Pausing** | The other player sees "Your friend paused the game"; enemies your game was running carry on in theirs. |
 | **Saving** | Each player saves their own game; when one saves, the other is told, so you can both save at the same point. |
 | **Pushed objects** (experimental) | Chairs, bottles and other loose props one of you knocks around move for the other too. |
+| **Catching up** | Each game keeps a list of the lasting changes it made (doors unlocked, boxes smashed, drawers, switches, supplies taken, Molded killed) for 12 hours. When your friend joins or rejoins, the list is sent and their game catches up, including what you did while they were away. |
+| **Talking** | Quick messages with **F5** (ping: "Over here"), **F6** (Come here), **F7** (Wait for me) and **F8** (Help!): your friend sees them at the top of the screen, and a marker for pings, Come here and Help. Each other's **health** shows on the status line and nameplate. |
 | Not shared | Item boxes, puzzles, phone calls, weapon sounds. |
 
 Made with [coop-anything](https://github.com/cranebeaker/coop-anything). MIT licensed.
@@ -69,6 +71,7 @@ The Lobby then says "Full character models: installed".
 5. The top-left corner shows **Co-op: connected to <name> - <ping> ms**, and they appear with their name over
    their head.
 6. Open **Lobby** to pick how you look to your friend (Ethan, Mia, Mia (ship), Clancy, Zoe, Chris, Joe).
+7. Use **F5-F8** to send quick messages (see *Talk and catch up* below).
 
 Your friend is remembered, so next time it reconnects by itself. Connecting by SteamID still works, under
 **Connect with a SteamID instead**.
@@ -84,6 +87,7 @@ switched off first). **Teleport to my friend** works once you're within 40 m of 
 | **Lobby** | Both players, their chapters, and **You appear to your friend as**: Default (whoever you're playing), Ethan, Mia, Mia (ship), Clancy, Zoe, Chris, Joe. Without the full-model mod some lack a face. |
 | **Allow saving** | Off by default: nothing you do is saved. Turn on to save normally. Your save folder is backed up automatically (at every launch and when you turn this on; the last 20 backups are kept in `reframework\data\save_backups`). The co-op copy shares Steam Cloud saves with your normal RE7. When one of you saves, the other sees "Your friend saved" so you can both save at the same point. |
 | **Back up saves now** | An extra backup on demand. |
+| **Talk and catch up** | Quick-message buttons (the same as F5-F8, plus "Go on ahead"), a switch for the F5-F8 keys, your catch-up list, **Catch up now** (both ways, if something looks out of step), and **Start a fresh list** (when you start a new game together, so old changes aren't sent). |
 | **Make a bug report** | Puts a zip of the co-op logs on your desktop, with SteamIDs, Steam names and your Windows user name blanked out, ready to send. |
 | **On-screen status** | The top-left status lines (connection, ping, chapter, saving, what your friend just did). |
 | **Nameplate over your friend** | Their Steam name and distance above their character; when they're off screen, a pointer at the screen edge. |
@@ -167,6 +171,7 @@ that happen once (a kill, a door, a pickup, a cutscene) and 10-a-second enemy up
 | `coop_dummy.lua` | Your friend's character, the Lobby, connecting, the RE7 Co-op window, on-screen status, footsteps |
 | `coop_enemies.lua` | Shared enemy damage, deaths and movement (who runs each enemy), pausing |
 | `coop_world.lua` | Shared doors, drawers, breakable boxes and supplies |
+| `coop_talk.lua` | The catch-up list, quick messages, pings and health |
 | `coop_story.lua` | Shared story cutscenes and progress; "your friend saved" |
 | `coop_revive.lua` | Downed and revive |
 | `coop_saveguard.lua` | Blocks saving unless you allow it |
