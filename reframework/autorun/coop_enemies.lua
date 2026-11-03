@@ -62,11 +62,36 @@ local function is_regular(name)
 end
 
 -- Boss mode: only the stalker Jack (Em3000) and the Molded have their movement shared. Boss
--- fights and story characters (Jack's later forms Em3001/Em3002 in the garage car fight and
--- after, the family Em31xx-Em33xx...) are scripted around the local player and their props
--- (the garage car), so each game runs its own copy; damage and defeat are still shared.
+-- fights and story characters (Jack's later forms, the family Em31xx-Em33xx...) are scripted
+-- around the local player and their props, so each game runs its own copy; damage and defeat
+-- are still shared.
+-- The garage car fight is Em3000 too (same SaveGUID as the stalker Jack), so it's found by
+-- story progress: stage hash 9fb77189 went to 900 at the garage cutscenes (c03e02_10,
+-- c03e02_00) and to 1000 at the defeat (c03e03_00) (solo run, 2026-11-03). Other Jack fights
+-- (the chainsaw one in the basement) aren't mapped yet.
+local JACK_BOSS_STAGES = { { hash = 0x9fb77189, from = 900, to = 999 } }
+local boss_cache = { t = -100, on = false }
+function jack_boss_fight()
+    local now = os.clock()
+    if now - boss_cache.t < 1 then return boss_cache.on end
+    boss_cache.t = now
+    local on = false
+    local fm = sdk.get_managed_singleton("app.GameFlowFsmManager")
+    for _, st in ipairs(JACK_BOSS_STAGES) do
+        local var = fm and safe(fm.call, fm, "getProgressiveNo(System.UInt32)", st.hash)
+        local v = var and tonumber(safe(var.call, var, "get_S32"))
+        if v and v >= st.from and v <= st.to then on = true end
+    end
+    if on ~= boss_cache.on then
+        log(on and "boss mode: Jack's garage fight (each game runs its own Jack)" or "boss mode: off")
+    end
+    boss_cache.on = on
+    return on
+end
+
 function moves_shared(name)
-    return name == "Em3000" or is_regular(name)
+    if name == "Em3000" then return not jack_boss_fight() end
+    return is_regular(name)
 end
 
 local function guid_text(g)
@@ -225,9 +250,18 @@ function flinch(e, amount)
     end
     if e.ac == nil then return "no action controller" end
     if e.ac:call("get_isForbidDamageReaction") then return "reactions forbidden right now" end
-    local rs = sdk.create_instance("app.EnemyActionController.ResistResultSet")
-    if rs == nil then return "no ResistResultSet" end
-    pcall(rs.call, rs, ".ctor")
+    -- sdk.create_instance gave nothing (2026-11-03, on Jack): it's most likely a struct, which
+    -- REFramework builds with ValueType.new.
+    local td = sdk.find_type_definition("app.EnemyActionController.ResistResultSet")
+    if td == nil then return "no ResistResultSet type" end
+    local rs
+    if td:is_value_type() then
+        rs = ValueType.new(td)
+    else
+        rs = sdk.create_instance("app.EnemyActionController.ResistResultSet")
+        if rs then pcall(rs.call, rs, ".ctor") end
+    end
+    if rs == nil then return "no ResistResultSet (value type: " .. tostring(td:is_value_type()) .. ")" end
     rs:set_field("result", RESIST_DAMAGED)
     rs:set_field("resistType", (amount or 0) >= 200 and RESIST_MIDDLE or RESIST_SMALL)
     rs:set_field("resistParts", PART_CHEST)

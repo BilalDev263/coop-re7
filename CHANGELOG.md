@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.18 (2026-11-03)
+Fixes from a solo run through Jack's garage fight; not yet tested between two players. Both players need v0.18.
+- **Boss mode now covers Jack's garage fight.** The garage Jack is the same enemy as the stalker Jack, so the
+  fight is recognised by story progress instead: from the garage cutscene until Jack goes down, each game runs
+  its own Jack.
+- **Enemy flinch fixed**: the hit reaction for your friend's hits couldn't be created at all ("no
+  ResistResultSet" in the log); it's now built the right way. Still untested in play.
+- **Fixed: your friend's character rebuilt itself (T-pose for a moment) while they held the handgun.** The
+  handgun's walk animation is longer than the bare-hands one, and the animation check took that for a broken
+  animation.
+
 ## v0.17 (2026-11-03)
 Fixes found in the logs; not yet tested in play. Works with v0.16, but update both sides: the supplies fix is in the game that sends.
 - **Fixed: leaving an area could take your friend's supplies away.** RE7 hides an area's items when you leave it,

@@ -1060,3 +1060,23 @@ Not synced / broken, as reported by the owner:
   and applied after the 3 s refresh once loaded (one-off interactions and door swings are not replayed).
 - Clip list (coop_motions.txt) only shows the set the body was on; other weapons' IDs can't be checked offline.
   Hold-pose skip ranges (2000-2099, 2200-2204) assume all weapon sets share the knife's numbering.
+- Garage fight (solo, 2026-11-03): ran normally. Garage Jack is Em3000 with the stalker's SaveGUID
+  (71041570-...), so name-based boss mode missed it. Stage 9fb77189 went 800 -> 900 at c03e02_10/c03e02_00
+  (garage) and 1000 at c03e03_00 (defeat). jack_boss_fight() now makes Em3000 local while 900-999.
+- Bot hits on Jack 2500 each: 9998 -> 7498 -> 4998 -> 2498, later 1996 -> 1 (never below 1, by design).
+  flinch: "no ResistResultSet" from sdk.create_instance -> now ValueType.new when td:is_value_type().
+- v0.17 pickup filter worked live: area changes logged 4-12 "not a pickup" items instead of sending them.
+- Pistol on the bot: aim and shot animation play, but no muzzle flash, no sound, and the reload drops no
+  magazine (the shown weapon is a bare mesh; the real one has its own Motion, ObjectEffectManager and Wwise).
+- Pistol research (2026-11-03, in game): a shot calls WeaponGun.shoot -> fireBullet -> CartridgeRequester.createCartridge;
+  reload calls WeaponGun.reload(Inventory, n). No app-level Wwise trigger or ObjectEffectManager request around a
+  shot (all instances hooked): sound and flash come from native motion/sequence tracks. app.Item.get_ItemData()
+  .ItemPrefab = Prefab/Weapon/wp1210_Handgun/Item/wp1210_Handgun_Item.pfb (the equipped object, with WeaponGun,
+  ObjectEffectManager, EPVExpertMuzzleFlush/GunSmoke, Wwise). Instantiated and parented to the ghost's R_Wep, its
+  shootNoneBullet() played the shot SOUND (owner heard it; flash not seen). BUT with the real gun attached the ghost
+  slid/T-posed, and ~6 s after a second instance the game exited silently (no dump; last log line a getComponent
+  InvalidOperationException on it). Not shipped. Next try: unparented instance, copy the hand transform per frame,
+  disable its Motion/MotionFsm/WeaponGun update, only call shootNoneBullet.
+- With the handgun set (TargetBankType 100) the walk ID 20 binds the handgun's 284-frame clip; verify_playback
+  called it a bad bind and rebuilt the whole ghost (12:57:32). Length check and full rebuild now skipped while a
+  weapon set is on.

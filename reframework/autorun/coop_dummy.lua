@@ -855,7 +855,11 @@ local function verify_playback()
     local want_end = anim.playing and tonumber(anim.playing.frames or 0) or 0
     -- During a blend the layer can still report the previous clip's length (20:50:
     -- JogB showed 48, JogL's), so a wrong length only counts on two checks in a row.
-    local wrong_now = want_end > 0 and endf > 0 and math.abs(endf - want_end) > 0.5
+    -- With a weapon set on (anim.bank, the friend's TargetBankType) the same motion ID can be
+    -- that weapon's own clip (handgun: the walk was 284 frames, not 78), so the length says
+    -- nothing then (2026-11-03: it rebuilt the whole ghost, and the held gun with it).
+    local weapon_set = (anim.bank or 0) ~= 0
+    local wrong_now = not weapon_set and want_end > 0 and endf > 0 and math.abs(endf - want_end) > 0.5
     local wrong_end = wrong_now and anim.wrong_prev == (anim.playing and anim.playing.name)
     anim.wrong_prev = wrong_now and (anim.playing and anim.playing.name) or nil
     if wrong_now and not wrong_end then anim.verify_at = os.clock() + 0.5 end   -- re-check soon
@@ -864,7 +868,7 @@ local function verify_playback()
         local bad = anim.playing
         -- Several rebuilds in a row that still don't bind: rebuild the whole ghost.
         anim.fail_streak = (anim.fail_streak or 0) + 1
-        if anim.fail_streak >= 3 and os.clock() - (anim.last_full_rebuild or -100) > 30 then
+        if anim.fail_streak >= 3 and not weapon_set and os.clock() - (anim.last_full_rebuild or -100) > 30 then
             anim.last_full_rebuild = os.clock()
             anim.fail_streak = 0
             log("verify: layer rebuilds keep failing; rebuilding the whole Ethan ghost")
