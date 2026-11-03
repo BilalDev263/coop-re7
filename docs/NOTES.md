@@ -1051,3 +1051,12 @@ Not synced / broken, as reported by the owner:
 - Box contents for both: ItemDropDestruct.setItem() rolls the drop (SetItemID or DROP_TABLE_DEFAULT) and creates
   DropItem as a CHILD of the box at world 0,0,0 (set_Position doesn't stick while parented). Detach (set_Parent nil)
   then set_Position to the box spot works. Box items get a SaveGUID; excluded from shared pickups (ws.box_items).
+- Log review (offline, 2026-11-03): an area change sent 8 bogus "got" (ItemDataID nil) at once; items also cycle
+  0->6 repeatedly. Leaving an area hides items like a pickup, so supplies would send "took" and vanish for the
+  friend. Pickups now need ItemDataID, the item's first-seen spot within 4 m of the player, and report once.
+- ~2,700 via.GameObject.get_Transform InvalidOperationExceptions in one minute after an area change: poll_phys
+  (4 Hz) on unloaded RigidBodyDynamics until the 3 s refresh. Entries now dropped on the first failed read.
+- Unlocks (door) and box/drawer/switch states for areas not loaded here are kept in pending_unlock/pending_props
+  and applied after the 3 s refresh once loaded (one-off interactions and door swings are not replayed).
+- Clip list (coop_motions.txt) only shows the set the body was on; other weapons' IDs can't be checked offline.
+  Hold-pose skip ranges (2000-2099, 2200-2204) assume all weapon sets share the knife's numbering.

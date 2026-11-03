@@ -21,6 +21,8 @@ world_sync = {
     doors_t = -100, poll_t = 0, items_t = -100,
     items = {},        -- id -> { it = Item, go }
     pending_took = {}, -- id -> chapter
+    pending_unlock = {},  -- door id -> chapter (unlocked by the friend, not loaded here yet)
+    pending_props = {},   -- "kind:id" -> { kind, id, want, ch } (same, for boxes/drawers/switches)
     applying = {},     -- id -> clock: changes we made on the friend's word (not sent back)
     props = {},        -- "box:<id>" / "drawer:<id>" -> { c = component, kind, on }
     props_t = -100,
@@ -130,7 +132,15 @@ end
 local function apply_door(kind, id, ch)
     if ch ~= chapter() then return end
     local s = ws.doors[id]
-    if s == nil then log("door not loaded here: " .. kind .. " " .. id) return end
+    if s == nil then
+        if kind == "unlock" then
+            ws.pending_unlock[id] = ch   -- applied when that area loads here
+            log("remembered unlock: " .. id)
+        else
+            log("door not loaded here: " .. kind .. " " .. id)
+        end
+        return
+    end
     ws.applying[id] = os.clock()
     if kind == "unlock" then
         if s.d:call("get_isLocked") then
@@ -181,7 +191,9 @@ local function refresh_items()
         if id then
             seen[id] = true
             if ws.items[id] == nil then
-                ws.items[id] = { it = it, go = it:call("get_GameObject"), state = safe(it.call, it, "getItemState") }
+                local go = it:call("get_GameObject")
+                ws.items[id] = { it = it, go = go, state = safe(it.call, it, "getItemState"),
+                    pos = safe(function() return go:call("get_Transform"):call("get_Position") end) }
             end
             ws.items[id].it = it
         end
@@ -219,7 +231,19 @@ end
 -- fired): the game hides the item lying in the world (getItemState 0 -> 6, as
 -- disableFromScene does) and makes a separate inventory Item. So watch world items for
 -- 0 -> 6, except the ones we hid on the friend's word.
+-- Leaving an area hides its items the same way (2026-11-03: 8 "pickups" at once on an area
+-- change, all without an ItemDataID, and the same items again and again): only an item with
+-- a name, within reach of us, counts, and each item is reported once.
 local ITEM_IN_SCENE, ITEM_GONE = 0, 6
+local PICKUP_REACH = 4.0
+ws.reported = ws.reported or {}
+local function within_reach(e)
+    if e.pos == nil then return false end
+    local player = sdk.get_managed_singleton("app.ObjectManager"):get_field("PlayerObj")
+    local pp = player and safe(function() return player:call("get_Transform"):call("get_Position") end)
+    if pp == nil then return false end
+    return (pp.x - e.pos.x) ^ 2 + (pp.y - e.pos.y) ^ 2 + (pp.z - e.pos.z) ^ 2 < PICKUP_REACH * PICKUP_REACH
+end
 local function poll_items(now)
     for id, e in pairs(ws.items) do
         local st = safe(e.it.call, e.it, "getItemState")
@@ -228,6 +252,15 @@ local function poll_items(now)
             if ws.box_items and ws.box_items[id] then
                 ours = true   -- a box's item: the friend has their own
             end
+            if not ours and (ws.reported[id] or e.it:get_field("ItemDataID") == nil or not within_reach(e)) then
+                ws.not_pickup = ws.not_pickup or {}
+                if not ws.reported[id] and not ws.not_pickup[id] then
+                    ws.not_pickup[id] = true
+                    log(string.format("not a pickup (no name or out of reach): %s %s", id, tostring(e.it:get_field("ItemDataID"))))
+                end
+                ours = true
+            end
+            if not ours then ws.reported[id] = true end
             if not ours and is_supply(e.it) then
                 send(string.format("took %s %d %s", id, chapter(), tostring(e.it:get_field("ItemDataID"))))
             elseif not ours then
@@ -311,7 +344,17 @@ local function apply_prop(kind, id, want, ch)
     if ch ~= chapter() then return end
     local key = kind .. ":" .. id
     local s = ws.props[key]
-    if s == nil then log(kind .. " not loaded here: " .. id) return end
+    if s == nil then
+        if kind ~= "intr" then
+            -- Boxes, drawers and switches keep their state: applied when that area loads here.
+            -- One-off interactions aren't replayed later (they can start scripted moments).
+            ws.pending_props[key] = { kind = kind, id = id, want = want, ch = ch }
+            log("remembered " .. kind .. ": " .. id)
+        else
+            log(kind .. " not loaded here: " .. id)
+        end
+        return
+    end
     local before = safe(s.pt.state, s.c) == true
     if before == want then return end
     ws.applying[key] = os.clock()
@@ -390,13 +433,15 @@ local function refresh_phys()
         local known = ws.phys_by_addr[c:get_address()]
         if known and ws.phys[known] then seen[known] = true
         elseif go then
-            local p = go:call("get_Transform"):call("get_Position")
-            local key = string.format("%s@%.1f,%.1f,%.1f", tostring(go:call("get_Name")), p.x, p.y, p.z)
-            if ws.phys[key] == nil then
-                ws.phys[key] = { key = key, c = c, go = go, last = { x = p.x, y = p.y, z = p.z }, sent_t = -100 }
+            local p = safe(function() return go:call("get_Transform"):call("get_Position") end)
+            if p then
+                local key = string.format("%s@%.1f,%.1f,%.1f", tostring(go:call("get_Name")), p.x, p.y, p.z)
+                if ws.phys[key] == nil then
+                    ws.phys[key] = { key = key, c = c, go = go, last = { x = p.x, y = p.y, z = p.z }, sent_t = -100 }
+                end
+                ws.phys_by_addr[c:get_address()] = key
+                seen[key] = true
             end
-            ws.phys_by_addr[c:get_address()] = key
-            seen[key] = true
         end
     end
     for key in pairs(ws.phys) do if not seen[key] then ws.phys[key] = nil end end
@@ -410,7 +455,12 @@ local function poll_phys(now)
     for key, s in pairs(ws.phys) do
         local tr = safe(s.go.call, s.go, "get_Transform")
         local p = tr and safe(tr.call, tr, "get_Position")
-        if p and (p.x - pp.x) ^ 2 + (p.z - pp.z) ^ 2 < PHYS_NEAR * PHYS_NEAR then
+        if p == nil then
+            -- Unloaded (area change): every call on it throws a game exception (about 2,700
+            -- logged in a minute once), so forget it now instead of at the next refresh.
+            ws.phys[key] = nil
+            if ws.phys_by_addr then ws.phys_by_addr[s.c:get_address()] = nil end
+        elseif (p.x - pp.x) ^ 2 + (p.z - pp.z) ^ 2 < PHYS_NEAR * PHYS_NEAR then
             local moved = math.sqrt((p.x - s.last.x) ^ 2 + (p.y - s.last.y) ^ 2 + (p.z - s.last.z) ^ 2)
             local ours = ws.applying["phys:" .. key] and now - ws.applying["phys:" .. key] < 2
             if moved > PHYS_MOVE and not ours and now - s.sent_t > 0.25 then
@@ -442,6 +492,22 @@ local function apply_phys(key, x, y, z, qw, qx, qy, qz, ch)
         local after = tr:call("get_Position")
         log(string.format("phys %s: %.2f %.2f %.2f -> wanted %.2f %.2f %.2f, now %.2f %.2f %.2f", key,
             before.x, before.y, before.z, x, y, z, after.x, after.y, after.z))
+    end
+end
+
+-- Changes the friend made in an area that wasn't loaded here, applied once it is.
+local function apply_pending()
+    for id, ch in pairs(ws.pending_unlock) do
+        if ws.doors[id] and ch == chapter() then
+            ws.pending_unlock[id] = nil
+            pcall(apply_door, "unlock", id, ch)
+        end
+    end
+    for key, p in pairs(ws.pending_props) do
+        if ws.props[key] and p.ch == chapter() then
+            ws.pending_props[key] = nil
+            pcall(apply_prop, p.kind, p.id, p.want, p.ch)
+        end
     end
 end
 
@@ -499,6 +565,8 @@ re.on_frame(function()
         if not ok and not ws.prop_err then ws.prop_err = true log("props ERR " .. tostring(err)) end
         local fok, ferr = pcall(refresh_phys)
         if not fok and not ws.phys_err then ws.phys_err = true log("phys ERR " .. tostring(ferr)) end
+        local aok, aerr = pcall(apply_pending)
+        if not aok and not ws.pend_err then ws.pend_err = true log("pending ERR " .. tostring(aerr)) end
     end
     if now - ws.items_t > 2 then
         ws.items_t = now

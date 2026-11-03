@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.17 (2026-11-03)
+Fixes found in the logs; not yet tested in play. Works with v0.16, but update both sides: the supplies fix is in the game that sends.
+- **Fixed: leaving an area could take your friend's supplies away.** RE7 hides an area's items when you leave it,
+  the same way it hides a picked-up item, so the mod sent "took" for items you never touched. Now only an item
+  within reach of you counts as a pickup, and each item is reported once.
+- **Changes in areas the other player hasn't loaded yet** are remembered and applied when they get there: doors
+  your friend unlocked, boxes they smashed (with the item), drawers and switches.
+- Less stutter after area changes: pushed-object tracking stopped asking unloaded objects for their position
+  (thousands of game errors a minute).
+
 ## v0.16 (2026-11-03)
 Weapon swings, the held weapon and boxes were tested with the bot; boss mode is untested. Both players need v0.16.
 - **Boss mode**: in boss fights (Jack in the garage car fight and later) each game runs its own boss, so the

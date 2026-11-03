@@ -1,4 +1,4 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.16)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.17)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
 or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
