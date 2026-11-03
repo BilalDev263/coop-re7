@@ -7,6 +7,8 @@
 --   took <item id> <chapter> <item name>  a supply was picked up
 --   break <box id> <chapter>    a breakable box (app.ItemDropDestruct) was smashed
 --   drawer <id> <0|1> <chapter> a drawer (app.InteractDrawer) was shut / pulled open
+--   intr <id> <chapter>         a one-off interaction (fridge, van, pot...) was completed
+--   switch <id> <0|1> <chapter> a switch (app.InteractSwitch) was turned off / on
 -- Doors (app.DoorPush) and items (app.Item) carry SaveGUID, saved in the level, so the id
 -- is the same on both PCs. Supplies (ammo, healing, materials, weapons) picked up by one
 -- player vanish for the other (Item.disableFromScene); key items, files and maps stay in
@@ -207,6 +209,10 @@ local function poll_items(now)
             local ours = ws.applying[id] and now - ws.applying[id] < 3
             if not ours and is_supply(e.it) then
                 send(string.format("took %s %d %s", id, chapter(), tostring(e.it:get_field("ItemDataID"))))
+            elseif not ours then
+                -- Keys, weapons, files: they stay for the friend, who is told to pick them up too
+                -- (their pickup can start a scripted moment in their game, like Jack's wall).
+                send(string.format("got %s %d %s", id, chapter(), tostring(e.it:get_field("ItemDataID"))))
             end
         end
         e.state = st
@@ -221,7 +227,18 @@ end
 local PROP_TYPES = {
     { kind = "box", type = "app.ItemDropDestruct", state = function(c) return c:get_field("IsBreaked") == true end },
     { kind = "drawer", type = "app.InteractDrawer", state = function(c) return c:get_field("NowDrawerOpen") == true end },
+    -- One-off interactions (open the fridge, the van, stir the pot...): app.InteractSendFsm and
+    -- app.InteractLongPressSendFSM count successes in InteractObjectBase.InteractSuccessCount;
+    -- the other game runs successInteract(), the game's own "done" step. Experimental: it can
+    -- only be judged in play, so "Share interactions" can switch it off.
+    { kind = "intr", type = "app.InteractSendFsm", optional = true,
+        state = function(c) return (tonumber(c:get_field("InteractSuccessCount")) or 0) > 0 end },
+    { kind = "intr", type = "app.InteractLongPressSendFSM", optional = true,
+        state = function(c) return (tonumber(c:get_field("InteractSuccessCount")) or 0) > 0 end },
+    { kind = "switch", type = "app.InteractSwitch", optional = true,
+        state = function(c) return c:get_field("NowSwitchOn") == true end },
 }
+local function interactions_shared() return not (settings and settings.share_interactions == false) end
 
 local function refresh_props()
     local sc = scene()
@@ -249,7 +266,11 @@ local function poll_props(now)
         local ours = ws.applying[key] and now - ws.applying[key] < 3
         if on ~= s.on and not ours then
             if s.kind == "box" and on then send(string.format("break %s %d", s.id, chapter()))
-            elseif s.kind == "drawer" then send(string.format("drawer %s %d %d", s.id, on and 1 or 0, chapter())) end
+            elseif s.kind == "drawer" then send(string.format("drawer %s %d %d", s.id, on and 1 or 0, chapter()))
+            elseif s.kind == "intr" and on and interactions_shared() then send(string.format("intr %s %d", s.id, chapter()))
+            elseif s.kind == "switch" and interactions_shared() then
+                send(string.format("switch %s %d %d", s.id, on and 1 or 0, chapter()))
+            end
         end
         s.on = on
     end
@@ -277,6 +298,12 @@ local function apply_prop(kind, id, want, ch)
             ok, err = false, "no RigidBodyCompo"
         end
         note("your friend smashed a box")
+    elseif kind == "intr" then
+        ok, err = pcall(s.c.call, s.c, "successInteract")
+        note("your friend used something here (" .. tostring(safe(function() return s.c:call("get_GameObject"):call("get_Name") end)) .. ")")
+    elseif kind == "switch" then
+        ok, err = pcall(s.c.call, s.c, "SetSwitch(System.Boolean)", want)
+        note(want and "your friend switched something on" or "your friend switched something off")
     else
         ok, err = pcall(s.c.call, s.c, "SetSwitch(System.Boolean)", want)
         note(want and "your friend opened a drawer" or "your friend shut a drawer")
@@ -296,6 +323,25 @@ function coop_world_on_event(text)
     if bid then pcall(apply_prop, "box", bid, true, tonumber(bch)) return true end
     local did, don, dch = text:match("^drawer (%S+) ([01]) (%-?%d+)")
     if did then pcall(apply_prop, "drawer", did, don == "1", tonumber(dch)) return true end
+    local iid, ich = text:match("^intr (%S+) (%-?%d+)")
+    if iid then
+        if interactions_shared() then pcall(apply_prop, "intr", iid, true, tonumber(ich)) end
+        return true
+    end
+    local sid, son, sch = text:match("^switch (%S+) ([01]) (%-?%d+)")
+    if sid then
+        if interactions_shared() then pcall(apply_prop, "switch", sid, son == "1", tonumber(sch)) end
+        return true
+    end
+    local gid, gch, gname = text:match("^got (%S+) (%-?%d+) (%S+)")
+    if gid then
+        if tonumber(gch) == chapter() then
+            local e = ws.items[gid]
+            local here = e and safe(e.go.call, e.go, "get_Draw")
+            note("your friend picked up " .. gname .. (here and ": pick it up too, it's still here for you" or ""))
+        end
+        return true
+    end
     local tid, tch, tname = text:match("^took (%S+) (%-?%d+) (%S+)")
     if tid then pcall(apply_took, tid, tonumber(tch), tname) return true end
     return false

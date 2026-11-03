@@ -1,7 +1,7 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.12)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.13)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
-or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around and blocks where they do,
+or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
 over Steam (no port forwarding).
 
 > **Prototype.** The first real two-player session (2026-11-02) got from the start of the game to the first
@@ -13,15 +13,15 @@ over Steam (no port forwarding).
 
 | | |
 |---|---|
-| **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, blocking (and other moves RE7 plays on the upper body, like touching a door). How you look: pick a character in the **Lobby**. |
+| **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, and the moves RE7 plays on your body (blocking, touching doors, and full-body moves like ladders). A downed friend lies on the floor. How you look: pick a character in the **Lobby**. |
 | **Enemies** (early) | Each enemy is run by the game of the player nearest to it and follows along in the other game; it changes hands when the other player gets clearly closer, and when one of you pauses. Damage and deaths count in both games. |
-| **Doors, drawers, boxes** | A door unlocked, opened or closed in one game does the same in the other. Drawers open and shut for both; a breakable box smashed by one breaks for both. |
-| **Supplies** | Ammo, healing and crafting materials picked up by one player disappear for the other. Weapons, keys, files and maps stay for both, so nobody gets stuck. |
-| **Story** (experimental, off by default) | With **Share story** ticked, a cutscene one of you starts also plays for the other when you're close together (same chapter, about 12 m). |
+| **Doors, drawers, boxes, interactions** | A door unlocked, opened or closed in one game does the same in the other. Drawers open and shut for both; a breakable box smashed by one breaks for both. One-off interactions (the fridge, the van, the pot, switches) happen in both games (experimental). |
+| **Supplies** | Ammo, healing and crafting materials picked up by one player disappear for the other. Weapons, keys, files and maps stay for both, so nobody gets stuck; when one of you takes one, the other is told to pick it up too. |
+| **Story** (experimental, off by default) | With **Share story** ticked, a cutscene or one of Jack's scripted moments that one of you starts also plays for the other when you're close together (same chapter, about 12 m). **VHS tapes:** when your friend puts one in, you follow them into it. |
 | **Deaths** | With your friend connected, a fatal hit puts you **down** instead of a game over, until your friend stands next to you for 3 seconds. |
 | **Pausing** | The other player sees "Your friend paused the game"; enemies your game was running carry on in theirs. |
 | **Saving** | Each player saves their own game; when one saves, the other is told, so you can both save at the same point. |
-| Not shared | Item boxes, objects you push around (chairs), puzzles and one-off interactions (the van, the fridge), weapon swings and shots (not yet confirmed). |
+| Not shared | Item boxes, objects you push around with your body (chairs), puzzles, phone calls, weapon sounds. |
 
 Made with [coop-anything](https://github.com/cranebeaker/coop-anything). MIT licensed.
 
@@ -89,6 +89,8 @@ switched off first). **Teleport to my friend** works once you're within 40 m of 
 | **Nameplate over your friend** | Their Steam name above their character. |
 | **Friend's footsteps** | Hear your friend's footsteps where they walk (walk, jog and crouch sounds). |
 | **Share story (cutscenes and progress, experimental)** | Off by default. When ticked, a story cutscene your friend reaches also plays for you, but only if you're in the same chapter and within about 12 m of them; otherwise you see it yourself when you get there. Story progress is copied only right after a cutscene you watched together, so a player who's behind is never pushed ahead. |
+| **Follow my friend into VHS tapes** | On by default. When your friend goes from your chapter into a tape, your game jumps into it after them a few seconds later (saving is switched off first). Never back out: finish the tape. |
+| **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too. Turn off if one ever does something odd. |
 | **Go to my friend's chapter** | Jump to the start of the chapter your friend is in. Saving is switched off first. |
 | **Teleport to my friend** | Hop to them when you're within 40 m (same chapter). Further away, walk: RE7 only loads the area around you. |
 | **Show all online friends** | List every online Steam friend; connecting invites them for when they start RE7 Co-op. |
@@ -107,19 +109,20 @@ switched off first). **Teleport to my friend** works once you're within 40 m of 
 ## Known limits
 
 - **One real two-player session so far.** Fixes since then (enemy hand-offs, doors closing, boxes, drawers,
-  pausing, the Lobby, blocking, the story rework) were tested alone or with the bot only.
-- **Animations:** your friend's character walks, jogs, crouches, turns its head and blocks. Weapon swings and
-  shots, climbing ladders, scripted moments (phone calls, the leg scene) aren't shown yet. In VHS tapes the
-  character may slide instead of walking.
+  pausing, the Lobby, blocking, the story rework, everything new in v0.13) were tested alone or with the bot only.
+- **Animations:** your friend's character copies the moves RE7 plays on their body. Whether weapon swings and
+  shots are among them hasn't been tested yet. Scripted moments played by other actors (phone calls, the leg
+  scene) aren't shown. In VHS tapes the character may slide instead of walking.
 - **Characters:** Mia (non-ship) has a gap on her left side and dark eyes, and Joe has no hands, even with the
   full-model mod.
 - **Enemies:** an enemy runs on one player's game and mostly goes after that player. Your friend's shots don't
   make an enemy flinch on your screen. Jack's scripted moments (smashing through a wall) happen in each game
   on its own.
-- **Story:** keys and story items are picked up by each player separately, and some scripted events follow
-  that player's own pickup. Each VHS tape is played by each player on their own; use **Go to my friend's
-  chapter** to meet up after one. If a cutscene ever hangs and you can't move, restart the game and load again
-  (with saving off, nothing is lost).
+- **Story:** keys and story items are picked up by each player separately (you're told when your friend takes
+  one), because some scripted events follow that player's own pickup. If a cutscene ever hangs and you can't
+  move, restart the game and load again (with saving off, nothing is lost).
+- **Interactions** are shared by running the game's own "done" step in the other game; it may not show the
+  animation, and puzzles aren't included.
 - **Deaths:** going down has no fall animation (you crouch). "Both down" and the 90-second limit are untested.
 - **Item boxes** are separate per player.
 - Tested on RE7's current (ray-tracing) version. The older non-RT version (Steam beta `dx11_non-rt`) should

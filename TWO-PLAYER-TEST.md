@@ -77,6 +77,15 @@ Jack appears soon after dinner. Saving is off, so getting hurt costs nothing.
       screens (no flicker) and goes after B.
 - [ ] **Weapons**: A swings the knife and shoots. Does B see it? (Not expected yet; tell us either way.)
 
+## 9. New in v0.13 (10 min)
+
+- [ ] **Moves**: A swings a weapon, shoots, climbs a ladder, pushes a door. Which of these does B see?
+- [ ] **Downed**: A takes a fatal hit. B sees A lying on the floor, walks over, A gets up.
+- [ ] **VHS tape**: A puts a tape in (B nearby, same chapter). B's game follows into the tape a few seconds later.
+- [ ] **Interactions**: A opens the fridge or the van, or flips a switch. Does it happen in B's game?
+- [ ] **Keys**: A picks up a key. B is told to pick it up too, and it's still there for B.
+- [ ] **Jack** (Share story on, close together): Jack's scripted moments happen on both screens.
+
 ## Afterwards
 
 Each player clicks **Make a bug report** (RE7 Co-op window, *Connect, saving and display*) and sends the zip

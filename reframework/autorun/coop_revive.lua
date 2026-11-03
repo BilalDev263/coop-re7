@@ -189,17 +189,28 @@ re.on_frame(function()
 end)
 
 -- Friend's events (called by coop_enemies.lua); true if it was ours.
+-- The downed friend lies on the floor on our screen (Ethan's Hands_Supine_Loop, motion 200,
+-- played as a full-body move by coop_dummy's action layer) instead of only crouching.
+local SUPINE = 200
+local function friend_pose(down)
+    local net = coop_net_state and coop_net_state()
+    if net then net.forced_action, net.forced_action_layer = down and SUPINE or nil, 0 end
+end
+
 function coop_revive_on_event(text)
     if text:match("^down ") then
         rv.friend_down, rv.friend_down_t = true, os.clock()
+        pcall(friend_pose, true)
         note("your friend is down - go to them!")
         return true
     elseif text == "up" then
         rv.friend_down = false
+        pcall(friend_pose, false)
         note("your friend is back up")
         return true
     elseif text == "gameover" then
         rv.friend_down = false
+        pcall(friend_pose, false)
         if rv.downed then pcall(die_for_real, "your friend died while you were down") end
         note("your friend died")
         return true

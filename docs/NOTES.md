@@ -991,3 +991,23 @@ Not synced / broken, as reported by the owner:
   Packet change: both players need this version (old ones read chapter + 256*id as the chapter).
 - TESTED 2026-11-03 (bot, test_action=2300): ghost raised its arms in the block pose, and dropped them on release; sender verified: coopnet_out carried 5+256*2305 / 5+256*2306 while the owner blocked. Not yet seen between two players.
 - 2026-11-03: inventory addItem() from a probe left MenuManager _PlayerOperatableFlag/_CameraOperatableFlag false id 'InventoryMenu' (no menu open): player couldn't move. Cleared with flag:setFlag('InventoryMenu', true). Knife/G17 addItem returned LimitOver = already owned.
+- 2026-11-03: v0.12 published: publish repo commit f122e45 pushed; pre-release https://github.com/xXCroissantXx/coop-re7/releases/tag/v0.12 with coop-re7-v0.12.zip (SHA-256 4722268c...dd62749, download verified). docs/NOTES.md scrubbed with local/build/scrub_notes.py. Hub PR #283 not updated for v0.9-v0.12 yet.
+- 2026-11-03: hub PR #283 was already merged; opened https://github.com/cranebeaker/coop-anything/pull/320 (fork branch game/resident-evil-7-v0.12 from upstream a71be2c): write-up + directory entry (coop_scope partial x4, checked 2026-11-03), DIRECTORY.md regenerated.
+
+## v0.13 (2026-11-03, built, not published; all untested in game)
+- Actions from every player layer (4,1,2,3,5,6,7, then 0 for full-body clips with ID >= 1000); packet field =
+  chapter + 256*motionID + 2^24*layer; the ghost copies mask/blend mode from our player's layer of the same index.
+- Downed friend: coop_revive sets coop_net_state().forced_action = 200 (pl0000_Hands_Supine_Loop, layer 0)
+  on "down", clears on "up"/"gameover".
+- Follow into VHS tapes: TAPE_CHAPTERS 7, 10, 11, 12 (FF000/030/040/050); after being in the same chapter, when the
+  friend's chapter becomes a tape and ours isn't, join_friend() after 4 s out of cutscenes; never out of a tape.
+  Option follow_tapes (default on).
+- Shared interactions (option share_interactions, default on): app.InteractSendFsm / InteractLongPressSendFSM
+  InteractSuccessCount 0 -> >0 sends "intr <guid> ch", the other game calls successInteract(); app.InteractSwitch
+  NowSwitchOn -> "switch <guid> 0|1 ch", SetSwitch(bool).
+- Keys/weapons/files: "got <guid> ch <name>" -> notice to pick it up too (not given automatically: pickups can
+  start scripted moments).
+- coop_story also shares em3xxx_* events (Jack's scripted moves) under the Share story rules.
+- Not done: pushed physics props (app.Havok.RigidBodyDynamics, needs RigidBodySet calls seen in game), enemy
+  flinch, weapon sounds, Joe's hands, Mia's gap/eyes, phone calls.
+- Version string 0.13; kit zip package/coop-re7-v0.13.zip (= coop-re7-friend-test.zip).

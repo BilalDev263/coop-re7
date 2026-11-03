@@ -378,7 +378,11 @@ function coop_ghost() return dummy end
 -- and wall touches on layer 4. The action clip (bank 0 motion ID) rides in the packet's
 -- chapter field (chapter + 256 * motion ID); the friend's Ethan plays it on its own layer 1
 -- with the same mask and blend mode. Layer-0 walking is left to the ghost's own picker.
-ACTION_LAYERS = { 4, 1, 2 }
+-- Every layer is checked: upper-body and hand layers first (4, 1, 2, 3, 5, 6, 7), then a
+-- full-body action on layer 0 (ladders, interactions: any clip from ID 1000 up, since the
+-- walk set uses low IDs). Weapon banks also report BankID 0; bank 1 is camera-only.
+-- The packet field is chapter + 256 * motion ID + 2^24 * layer.
+ACTION_LAYERS = { 4, 1, 2, 3, 5, 6, 7, 0 }
 local act = { motion = nil, motion_go = nil }
 function local_action_clip(player)
     if act.motion_go ~= player then
@@ -386,26 +390,25 @@ function local_action_clip(player)
         act.motion = safe(player.call, player, "getComponent(System.Type)", sdk.typeof("via.motion.Motion"))
     end
     local m = act.motion
-    if m == nil then return 0 end
+    if m == nil then return 0, 0 end
+    local count = tonumber(safe(m.call, m, "getLayerCount") or 0) or 0
     for _, li in ipairs(ACTION_LAYERS) do
-        local L = safe(m.call, m, "getLayer", li)
-        if L then
-            local bank = safe(L.call, L, "get_MotionBankID")
-            local id = tonumber(safe(L.call, L, "get_MotionID") or 0xFFFFFFFF) or 0xFFFFFFFF
-            if bank == 0 and id >= 1000 and id < 65536 then
-                if act.mask == nil then
-                    -- Remember this layer's mask and blend mode for the ghost's action layer.
-                    act.mask = safe(L.call, L, "get_JointMaskID")
-                    act.blend_mode = safe(L.call, L, "get_BlendMode")
-                end
-                act.mask_by_id = act.mask_by_id or {}
-                act.mask_by_id[id] = act.mask_by_id[id] or { mask = safe(L.call, L, "get_JointMaskID"),
-                    mode = safe(L.call, L, "get_BlendMode") }
-                return id
+        if li < count then
+            local L = safe(m.call, m, "getLayer", li)
+            if L then
+                local bank = safe(L.call, L, "get_MotionBankID")
+                local id = tonumber(safe(L.call, L, "get_MotionID") or 0xFFFFFFFF) or 0xFFFFFFFF
+                if bank == 0 and id >= 1000 and id < 65536 then return id, li end
             end
         end
     end
-    return 0
+    return 0, 0
+end
+
+local function action_field(player)
+    local id, li = local_action_clip(player)
+    if id == 0 then return 0 end
+    return 256 * id + 16777216 * li
 end
 
 local function net_io()
@@ -424,7 +427,7 @@ local function net_io()
         -- received from the peer (mod 1000 s), so they can measure the round trip.
         fs.write("coopnet_out.txt", string.format("%d %.4f %.5f %.5f %.5f %.6f %.6f %.6f %.6f %d %d %.4f %.4f %.4f\n",
             net.seq, now, p.x, p.y, p.z, q.x, q.y, q.z, q.w, local_stance_flags(player),
-            local_chapter() + 256 * (local_action_clip(player) or 0),
+            local_chapter() + action_field(player),
             (net.peer_t or 0) % 1000, ly, lp))
     end
 
@@ -451,8 +454,10 @@ local function net_io()
                         pos = Vector3f.new(v[3], v[4], v[5]), rot = Quaternion.new(v[9], v[6], v[7], v[8]),
                         flags = math.floor(v[10]), look_yaw = v[13], look_pitch = v[14] }
                     net.peer_t = t                         -- echoed back to the peer
-                    net.peer_chapter = math.floor(v[11]) % 256
-                    net.peer_action = math.floor(math.floor(v[11]) / 256)
+                    local f = math.floor(v[11])
+                    net.peer_chapter = f % 256
+                    net.peer_action = math.floor(f / 256) % 65536
+                    net.peer_action_layer = math.floor(f / 16777216) % 8
                     -- Round trip: the peer echoes our own send time (mod 1000 s).
                     if v[12] and v[12] > 0 then
                         local rtt = (now % 1000) - v[12]
@@ -941,7 +946,10 @@ end
 
 function ghost_action()
     if not anim.ready or anim.motion == nil or anim.change == nil then return end
-    local want = net.test_action or net.peer_action or 0   -- test_action: set from a probe, bot tests
+    -- test_action: set from a probe (bot tests); forced_action: coop_revive's lying-down pose.
+    local want = net.test_action or net.forced_action or net.peer_action or 0
+    local src_layer = (net.test_action and (net.test_action_layer or 1))
+        or (net.forced_action and (net.forced_action_layer or 0)) or (net.peer_action_layer or 1)
     if want == (anim.action or 0) then return end
     local m = anim.motion
     if (tonumber(safe(m.call, m, "getLayerCount") or 0) or 0) < 2 then
@@ -958,8 +966,9 @@ function ghost_action()
         safe(L.call, L, "set_BlendRate", 0.0)
         return
     end
-    -- Touches (9000s) play on the player's layer 4, everything else on layer 1.
-    local mask, mode = own_layer_setup(want >= 9000 and 4 or 1)
+    -- Same mask and blend mode as the layer it came from on the friend's body (layer 0 =
+    -- a full-body move, which then covers the walk underneath).
+    local mask, mode = own_layer_setup(src_layer)
     if mask then safe(L.call, L, "set_JointMaskID", mask) end
     if mode then safe(L.call, L, "set_BlendMode", mode) end
     safe(L.call, L, "set_Resource", nil)
@@ -971,7 +980,8 @@ function ghost_action()
     end
     safe(L.call, L, "set_Speed", 1.0)
     safe(L.call, L, "set_BlendRate", 1.0)
-    log(string.format("action: friend plays motion %d (mask %s, mode %s)", want, tostring(mask), tostring(mode)))
+    log(string.format("action: friend plays motion %d from layer %d (mask %s, mode %s)", want, src_layer,
+        tostring(mask), tostring(mode)))
 end
 
 local function auto_animate(anchor, anchor_rot)
@@ -1578,6 +1588,33 @@ function join_friend()
     log("join: " .. join.msg)
 end
 
+-- Following into VHS tapes. Each tape is a chapter of its own (FF000, FF030, FF040,
+-- FF050 = ChapterNo 7, 10, 11, 12), so whoever puts a tape in is alone in it (2026-11-02).
+-- When the friend goes from our chapter into a tape, jump after them once we're in control.
+-- Never out of a tape: a jump lands at a chapter's start, which would undo where we were;
+-- the tape ends and returns us the normal way.
+TAPE_CHAPTERS = { [7] = true, [10] = true, [11] = true, [12] = true }
+local follow = { was_together = false, want_t = nil, done_for = nil }
+re.on_frame(function()
+    local now = os.clock()
+    if now - (follow.check_t or 0) < 1 then return end
+    follow.check_t = now
+    local last = net.history[#net.history]
+    local fresh = last ~= nil and (now - last.t) < (NET_TIMEOUT or 2)
+    local mine, theirs = local_chapter(), net.peer_chapter
+    if not fresh or theirs == nil or mine == nil then follow.want_t = nil return end
+    if theirs == mine then follow.was_together, follow.want_t, follow.done_for = true, nil, nil return end
+    if settings and settings.follow_tapes == false then return end
+    if not (follow.was_together and TAPE_CHAPTERS[theirs] and not TAPE_CHAPTERS[mine]) then return end
+    if follow.done_for == theirs then return end
+    if local_cutscene() then follow.want_t = nil return end
+    follow.want_t = follow.want_t or now
+    if now - follow.want_t < 4 then return end
+    follow.done_for = theirs
+    log("follow: friend went into tape chapter " .. chapter_name(theirs) .. "; following")
+    join_friend()
+end)
+
 re.on_frame(function()
     read_friends()   -- also feeds the on-screen invite line
 end)
@@ -1639,6 +1676,10 @@ local function draw_connect_body()
     -- Story cutscenes and progress follow whichever player reaches them first.
     local sc, sv = imgui.checkbox("Share story (cutscenes and progress, experimental)", settings.share_story == true)
     if sc then settings.share_story = sv save_settings() end
+    local tc, tv = imgui.checkbox("Follow my friend into VHS tapes", settings.follow_tapes ~= false)
+    if tc then settings.follow_tapes = tv save_settings() end
+    local ic, iv = imgui.checkbox("Share interactions (fridge, van, switches; experimental)", settings.share_interactions ~= false)
+    if ic then settings.share_interactions = iv save_settings() end
     if imgui.button("Teleport to my friend") then teleport_to_friend() end
 end
 

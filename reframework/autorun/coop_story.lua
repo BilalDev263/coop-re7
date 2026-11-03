@@ -25,6 +25,10 @@ story_sync = {
 }
 local ss = story_sync
 local STORY_NAME = "^c%d%de%d%d_%d%d$"
+-- Jack's scripted moments (breaking through the hatch-room wall, 2026-11-02) are events too,
+-- named em3000_*; they follow the same rules (same chapter, friend within NEAR).
+local SCRIPTED_NAME = "^em3%d%d%d_"
+local function is_story_event(name) return name:match(STORY_NAME) ~= nil or name:match(SCRIPTED_NAME) ~= nil end
 
 -- Cutscenes already played this chapter survive Reset scripts (coop_story_played.json):
 -- replaying one the game had finished (the dinner, on the bot's word after a reset) hung
@@ -104,7 +108,7 @@ sdk.hook(ec:get_method("requestSetup(app.GameEventSetting, via.Transform)"), fun
     pcall(function()
         local st = sdk.to_managed_object(args[3])
         local name = st and tostring(st:call("get_eventName"))
-        if name == nil or not name:match(STORY_NAME) then return end
+        if name == nil or not is_story_event(name) then return end
         local ch = chapter()
         if ss.played_chapter ~= ch then ss.played, ss.played_chapter = {}, ch end
         local first = not ss.played[name]

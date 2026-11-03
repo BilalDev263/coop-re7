@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.13 (2026-11-03)
+- **More of your friend's moves show**: every move RE7 plays on your body is now mirrored, not just blocking:
+  anything on the upper-body and hand layers (weapon swings and shots if RE7 plays them there) and full-body
+  moves such as climbing a ladder or interacting. Untested with weapons: tell us what you see.
+- **A downed friend lies on the floor** on your screen until you revive them (instead of crouching).
+- **Following into VHS tapes**: when your friend puts a tape in, your game follows them into it a few seconds
+  later (option *Follow my friend into VHS tapes*, on by default). It never jumps you back out; finish the tape.
+- **Shared interactions** (experimental, option *Share interactions*, on by default): one-off actions like
+  opening the fridge or the van, stirring the pot, long-press actions and switches happen in both games.
+- **Key and weapon pickups**: when your friend picks one up, you're told to pick it up too (it stays for you, so
+  your own story moments still happen).
+- **Jack's scripted moments** (smashing through a wall) are shared along with cutscenes when *Share story* is on
+  and you're close together.
+- Both players need v0.13 (the movement update changed again).
+
 ## v0.12 (after the first two-player session, 2026-11-02)
 - **Lobby**: see both players and their chapters, and pick how you look to your friend: Ethan, Mia, Mia (ship),
   Clancy, Zoe, Chris, Joe. Works with RE7's own models; with the Nexus mod "Third Person Full Model
