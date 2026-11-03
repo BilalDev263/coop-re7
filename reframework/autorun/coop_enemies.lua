@@ -61,6 +61,14 @@ local function is_regular(name)
     return name:match("^Em4%d%d%d") ~= nil
 end
 
+-- Boss mode: only the stalker Jack (Em3000) and the Molded have their movement shared. Boss
+-- fights and story characters (Jack's later forms Em3001/Em3002 in the garage car fight and
+-- after, the family Em31xx-Em33xx...) are scripted around the local player and their props
+-- (the garage car), so each game runs its own copy; damage and defeat are still shared.
+function moves_shared(name)
+    return name == "Em3000" or is_regular(name)
+end
+
 local function guid_text(g)
     local b = {}
     for i = 0, 7 do b[#b + 1] = string.format("%02x", (g:get_field("mData4_" .. i) or 0) & 0xFF) end
@@ -504,7 +512,7 @@ local function write_snapshot(now)
     local lines = { "seq " .. mv.seq, string.format("t %.3f ch %d", now, chapter()) }
     for _, e in pairs(es.tracked) do
         -- The host sends every enemy it runs; the guest only the ones handed to it.
-        local mine = mv.own[e.id] == "me" or (mv.role == "host" and mv.own[e.id] ~= "peer")
+        local mine = moves_shared(e.name) and (mv.own[e.id] == "me" or (mv.role == "host" and mv.own[e.id] ~= "peer"))
         if mine and safe(e.go.call, e.go, "get_Update") == true and not mv.puppets[e.id] then
             local l = safe(enemy_line, e)
             if l then lines[#lines + 1] = l end
@@ -531,6 +539,8 @@ local function read_snapshot(now)
     if mv.offset == nil or off < mv.offset or off > mv.offset + 5 then mv.offset = off end
     for line in text:gmatch("[^\n]+") do
         local id, s = parse_line(line)
+        local te = id and find_tracked(id)
+        if te and not moves_shared(te.name) then id = nil end   -- a boss: ours runs on its own
         if id then
             -- Both games running it: the host keeps it, the other side gives way.
             local take = true
@@ -699,7 +709,7 @@ function check_handoffs(now)
     local p = player:call("get_Transform"):call("get_Position")
     for _, e in pairs(es.tracked) do
         local cooling = mv.no_handoff and (mv.no_handoff[e.id] or 0) > now
-        if mv.own[e.id] ~= "peer" and not cooling and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
+        if moves_shared(e.name) and mv.own[e.id] ~= "peer" and not cooling and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
             local ep = e.go:call("get_Transform"):call("get_Position")
             -- 3 m of hysteresis so it doesn't bounce between games.
             if math.sqrt(dist2(ep, g)) + 3 < math.sqrt(dist2(ep, p)) then hand_off(e, now) end
@@ -735,7 +745,7 @@ local function watch_pause(now)
     send_event(paused and "pause 1" or "pause 0")
     if not paused then return end
     for _, e in pairs(es.tracked) do
-        if mv.own[e.id] ~= "peer" and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
+        if moves_shared(e.name) and mv.own[e.id] ~= "peer" and not e.dead and not mv.puppets[e.id] and safe(e.go.call, e.go, "get_Update") == true then
             hand_off(e, now)
         end
     end

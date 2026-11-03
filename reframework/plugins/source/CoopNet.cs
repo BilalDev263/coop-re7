@@ -119,11 +119,11 @@ public class CoopNet
             {
                 double dx = local.Px - s_cx, dz = local.Pz - s_cz;
                 bool far = Math.Sqrt(dx * dx + dz * dz) > 30.0 || Math.Abs(local.Py - s_cy) > 10.0;
-                if (local.Id == s_centerChapter && !far) return;
+                if ((local.Id & 0xFF) == s_centerChapter && !far) return;
                 API.LogInfo($"[CoopNet] bot re-centred ({(far ? "player moved far" : "chapter changed")})");
             }
             s_cx = local.Px; s_cy = local.Py; s_cz = local.Pz;
-            s_centerChapter = local.Id;
+            s_centerChapter = local.Id & 0xFF;
             s_haveCenter = true;
         }
 
@@ -147,7 +147,7 @@ public class CoopNet
             {
                 var last = s_trail[s_trail.Count - 1].s;
                 double jump = Dist(last, local.Px, local.Py, local.Pz);
-                if (jump > 10 || local.Id != last.Id || local.T < s_trail[s_trail.Count - 1].t)
+                if (jump > 10 || (local.Id & 0xFF) != (last.Id & 0xFF) || local.T < s_trail[s_trail.Count - 1].t)
                 {
                     // Load, chapter jump or teleport: the old trail leads nowhere now.
                     s_trail.Clear();
@@ -261,7 +261,7 @@ public class CoopNet
                 st.Px = at.Px; st.Py = at.Py; st.Pz = at.Pz;
                 st.Qx = 0; st.Qy = (float)Math.Sin(s_fyaw / 2); st.Qz = 0; st.Qw = (float)Math.Cos(s_fyaw / 2);
                 st.Bank = 4u;
-                st.Id = c.botChapter >= 0 ? (uint)c.botChapter : LastLocal.Id;
+                st.Id = c.botChapter >= 0 ? (LastLocal.Id & ~0xFFu) | (uint)c.botChapter : LastLocal.Id;
                 st.Frame = (float)(LastLocal.T % 1000.0);
                 Expect = "staying here";
                 Transmit(c, now, st);
@@ -273,7 +273,7 @@ public class CoopNet
                 var f = new Sample { Seq = ++s_seq, T = now };
                 if (FollowStep(c, now, dt, ref f))
                 {
-                    f.Id = c.botChapter >= 0 ? (uint)c.botChapter : LastLocal.Id;
+                    f.Id = c.botChapter >= 0 ? (LastLocal.Id & ~0xFFu) | (uint)c.botChapter : LastLocal.Id;
                     f.Frame = (float)(LastLocal.T % 1000.0);
                     Transmit(c, now, f);
                 }
@@ -319,7 +319,7 @@ public class CoopNet
             s.Bank = 4u | (stance == 2 ? 1u : 0u) | (stance == 0 ? 2u : 0u);
             // Chapter (same as ours unless faked) and the ping echo: like a real peer,
             // send back the newest sender time we've seen from the other side, mod 1000 s.
-            s.Id = c.botChapter >= 0 ? (uint)c.botChapter : LastLocal.Id;
+            s.Id = c.botChapter >= 0 ? (LastLocal.Id & ~0xFFu) | (uint)c.botChapter : LastLocal.Id;
             s.Frame = (float)(LastLocal.T % 1000.0);
             // Look around like a player: slow sweep left/right, gentle up/down.
             s.LookYaw = (float)(0.9 * Math.Sin(now * 0.7));
@@ -550,7 +550,7 @@ public class CoopNet
         public float LookYaw, LookPitch;   // camera relative to body, radians
     }
 
-    const string Version = "0.15";
+    const string Version = "0.16";
     const int PacketSize = 64;
     static readonly byte[] Magic = { (byte)'R', (byte)'7', (byte)'C', (byte)'2' };
     const int KeepSamples = 32;
@@ -776,9 +776,13 @@ public class CoopNet
             if (first) { s_evOutLast = Math.Max(s_evOutLast, id); continue; }
             if (id <= s_evOutLast) continue;
             s_evOutLast = id;
-            var pkt = EncodeEvent(line.Substring(tab + 1).TrimEnd('\r'));
+            var text = line.Substring(tab + 1).TrimEnd('\r');
+            var pkt = EncodeEvent(text);
             if (IsSteam) { if (s_peerSteam != 0) { Steam.SendReliable(pkt); s_evSent++; } }
             else if (s_sock != null) { s_sock.Send(pkt, pkt.Length, s_peer); s_evSent++; }
+            // The bot copies our moves, so it also holds what we hold.
+            else if (s_cfg.mode == "bot" && (text.StartsWith("weapon ") || text.StartsWith("bank ") || text.StartsWith("grip ")))
+                Bot.QueueEvent(s_cfg, text);
         }
         if (s_evOutLast < 0) s_evOutLast = 0;
     }

@@ -1023,3 +1023,31 @@ Not synced / broken, as reported by the owner:
   name@initial pos, within 12 m, moves > 0.15 m sent as "phys" at <= 4 Hz; apply = disable(), set transform,
   enable(); first 10 applies logged with before/wanted/now. Option share_physics. Joe hands: alts list,
   checked by get_MaterialNum after ~60 frames, next guess loaded. Weapon components logged on weapon change.
+- 2026-11-03: v0.15 published (publish commit 19b1200, includes v0.14): https://github.com/xXCroissantXx/coop-re7/releases/tag/v0.15
+- Boss mode (2026-11-03, after the v0.15 release; in the local kit only): moves_shared(name) = Em3000 or Em4xxx; other enemies (Em3001/3002 garage+later Jack, family, bosses) never sent/followed/handed over; damage, kill and flinch still shared. Garage fight: CarInGarage (70 types) not synced; a friend driving shows as their character moving at seat height.
+
+## 2026-11-03 solo test (knife, Chapter 1 main house)
+- Bot vanished on every action since v0.13: Sample.Id packs chapter + 256*motion + 2^24*layer, and the bot's
+  re-centre / trail-reset compared the whole Id, so a knife swing or block read as a chapter change. Fixed by
+  comparing Id & 0xFF (botChapter override now keeps the action bits).
+- Box share: RigidBodyDestruct.setBreak(vec3, vec3, vec3, GameObject, UInt32) throws "Invoke threw an exception"
+  from Lua with attacker nil; with PlayerObj as attacker it threw and then CRASHED the game (c0000005). Never
+  call it. Switched to setAlreadyBreak() + IsBreaked=true; untested.
+- Held weapon scan works: wp1190_Knife detected, "weapon" event sent.
+- Weapon swings: all weapon motlists are active on bank 0 (pl0000_Knife type 30, Handgun 100, Ax 10 ...);
+  Motion.TargetBankType picks the set (knife held -> 30). The ghost stayed on 0, so swing IDs 2001/2002/2400/2401
+  hit the wrong clip (and once froze the walk layer). Now "bank <n>" events; the ghost sets TargetBankType only
+  around changeMotion on layer 1 and back to 0. Bot echoes weapon/bank events (it never got any before).
+- Box: setAlreadyBreak() flips IsBreaked/IsBreak to true but the box still shows; dispBreakAfter(true) runs OK
+  (visual result asked of the user).
+- Box visual: setAlreadyBreak, dispBreakAfter(true) and breakObjectWithoutSetBreak all run but the box stays
+  drawn. Fallback: GameObject.set_DrawSelf(false) + Colliders/RigidBodySet set_Enabled(false) (verified OK live).
+  The box's item (SetItemID, e.g. HandgunBullet) doesn't drop on the receiving side.
+- Weapon grip: the real weapon (wp1190_Knife_Item) is parented to Pl0000 joint R_Wep with a local offset
+  (-0.099 -0.032 0.021, rot w0.681 0.339 -0.338 -0.554). Now sent as "grip" events.
+- Swing fix confirmed live: TargetBankType must stay set (clip binds a frame later); with 30 kept on, swings bind (2400/2401 end 62) and walk/idle keep 78/284. Ghost now keeps the friend's bank.
+- Knife hold loop (2001 etc., mask 120) covers the legs on the ghost (same JointMap/mask as the player; the player never sees its legs): ghost slid. Hold/aim loops (2000-2099, 2200-2204) now skipped while the ghost moves.
+- Smoothing attempt (2002->2001 merge + 0.15 s layer fade) made swings stop matching; reverted.
+- Box contents for both: ItemDropDestruct.setItem() rolls the drop (SetItemID or DROP_TABLE_DEFAULT) and creates
+  DropItem as a CHILD of the box at world 0,0,0 (set_Position doesn't stick while parented). Detach (set_Parent nil)
+  then set_Position to the box spot works. Box items get a SaveGUID; excluded from shared pickups (ws.box_items).

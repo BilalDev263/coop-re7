@@ -157,6 +157,21 @@ local function apply_door(kind, id, ch)
 end
 
 -- Items ------------------------------------------------------------------------------
+-- Items dropped by smashed boxes: each player gets their own (the friend's game rolls its
+-- own from the box's table), so their pickups are never shared. Both games' copies may
+-- carry the same SaveGUID.
+function box_item_ids()
+    ws.box_items = ws.box_items or {}
+    for _, s in pairs(ws.props or {}) do
+        if s.kind == "box" then
+            local di = safe(s.c.get_field, s.c, "DropItem")
+            local it = di and safe(di.call, di, "getComponent(System.Type)", sdk.typeof("app.Item"))
+            local id = it and id_of(it)
+            if id then ws.box_items[id] = true end
+        end
+    end
+end
+
 local function refresh_items()
     local sc = scene()
     local arr = sc and safe(sc.call, sc, "findComponents(System.Type)", sdk.typeof("app.Item"))
@@ -172,6 +187,7 @@ local function refresh_items()
         end
     end
     for id in pairs(ws.items) do if not seen[id] then ws.items[id] = nil end end
+    box_item_ids()
     -- Pickups the friend made before this area was loaded here.
     for id, ch in pairs(ws.pending_took) do
         local e = ws.items[id]
@@ -186,6 +202,7 @@ end
 
 local function apply_took(id, ch, name)
     if ch ~= chapter() then return end
+    if ws.box_items and ws.box_items[id] then log("box item stays here: " .. name) return end
     local e = ws.items[id]
     if e and safe(e.go.call, e.go, "get_Draw") then
         ws.applying[id] = os.clock()
@@ -208,6 +225,9 @@ local function poll_items(now)
         local st = safe(e.it.call, e.it, "getItemState")
         if e.state == ITEM_IN_SCENE and st == ITEM_GONE then
             local ours = ws.applying[id] and now - ws.applying[id] < 3
+            if ws.box_items and ws.box_items[id] then
+                ours = true   -- a box's item: the friend has their own
+            end
             if not ours and is_supply(e.it) then
                 send(string.format("took %s %d %s", id, chapter(), tostring(e.it:get_field("ItemDataID"))))
             elseif not ours then
@@ -297,18 +317,42 @@ local function apply_prop(kind, id, want, ch)
     ws.applying[key] = os.clock()
     local ok, err
     if kind == "box" then
-        -- The hit path: RigidBodyDestruct.setBreak(dir, pos, normal, attacker, type).
+        -- RigidBodyDestruct.setBreak(dir, pos, normal, attacker, type) always threw from Lua
+        -- (and crashed the game once with the player as attacker); setAlreadyBreak takes no
+        -- arguments, the state a box smashed in the save loads in. It (and dispBreakAfter,
+        -- breakObjectWithoutSetBreak) leaves the box drawn, so the box is also hidden and
+        -- its collision and physics switched off: it's simply gone (no pieces). Both players
+        -- get the contents: setItem() (the box's own drop, rolled from its table here) makes
+        -- the item as a child of the box at the world origin; it's detached and put where
+        -- the box stood. Box items are never shared pickups (see box_item_ids).
+        if s.c:get_field("DropItem") == nil and s.c:get_field("IsDropItem") ~= true then
+            local iok, ierr = pcall(s.c.call, s.c, "setItem")
+            if not iok then log("box item ERR " .. tostring(ierr)) end
+        end
         local rb = safe(s.c.get_field, s.c, "RigidBodyCompo")
-        local go = s.c:call("get_GameObject")
-        local pos = go:call("get_Transform"):call("get_Position")
-        local up = Vector3f.new(0, 1, 0)
         if rb then
-            ok, err = pcall(rb.call, rb, "setBreak(via.vec3, via.vec3, via.vec3, via.GameObject, System.UInt32)",
-                Vector3f.new(0, -1, 0), pos, up, nil, 0)
+            ok, err = pcall(rb.call, rb, "setAlreadyBreak")
+            if ok then pcall(s.c.set_field, s.c, "IsBreaked", true) end
         else
             ok, err = false, "no RigidBodyCompo"
         end
-        note("your friend smashed a box")
+        local go = s.c:call("get_GameObject")
+        safe(go.call, go, "set_DrawSelf", false)
+        for _, tn in ipairs({ "via.physics.Colliders", "via.dynamics.RigidBodySet" }) do
+            local comp = safe(go.call, go, "getComponent(System.Type)", sdk.typeof(tn))
+            if comp then safe(comp.call, comp, "set_Enabled", false) end
+        end
+        local di = s.c:get_field("DropItem")
+        local bp = safe(function() return go:call("get_Transform"):call("get_Position") end)
+        if di and bp then
+            local itr = di:call("get_Transform")
+            safe(itr.call, itr, "set_Parent", nil)
+            safe(itr.call, itr, "set_Position", Vector3f.new(bp.x, bp.y + 0.1, bp.z))
+            safe(di.call, di, "set_DrawSelf", true)
+            note("your friend smashed a box (its item is there for you too)")
+        else
+            note("your friend smashed a box")
+        end
     elseif kind == "intr" then
         if not intr_allowed(s.c) then log("intr " .. id .. ": not shared here (save, tape, phone...)") return end
         ok, err = pcall(s.c.call, s.c, "successInteract")

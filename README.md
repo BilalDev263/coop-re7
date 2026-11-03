@@ -1,4 +1,4 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.15)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.16)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
 or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
@@ -13,9 +13,9 @@ over Steam (no port forwarding).
 
 | | |
 |---|---|
-| **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, and the moves RE7 plays on your body (blocking, touching doors, and full-body moves like ladders). A downed friend lies on the floor. Their weapon in hand (experimental). A marker with the distance, pointing the way when they're off screen. How you look: pick a character in the **Lobby**. |
-| **Enemies** (early) | Each enemy is run by the game of the player nearest to it and follows along in the other game; it changes hands when the other player gets clearly closer, and when one of you pauses. Damage and deaths count in both games, and your friend's hits make the enemy flinch (experimental). |
-| **Doors, drawers, boxes, interactions** | A door unlocked, opened or closed in one game does the same in the other. Drawers open and shut for both; a breakable box smashed by one breaks for both. One-off interactions (the fridge, the van, the pot, switches) happen in both games (experimental). |
+| **Each other** | Position, movement, crouching, looking around, footsteps, which chapter you're in, and the moves RE7 plays on your body (blocking, weapon swings, touching doors, and full-body moves like ladders). A downed friend lies on the floor. Their weapon in hand. A marker with the distance, pointing the way when they're off screen. How you look: pick a character in the **Lobby**. |
+| **Enemies** (early) | Each enemy is run by the game of the player nearest to it and follows along in the other game; it changes hands when the other player gets clearly closer, and when one of you pauses. Damage and deaths count in both games, and your friend's hits make the enemy flinch (experimental). **Bosses** (Jack's garage car fight and later) run in each game on their own, with shared damage and defeat. |
+| **Doors, drawers, boxes, interactions** | A door unlocked, opened or closed in one game does the same in the other. Drawers open and shut for both; a breakable box smashed by one disappears for the other (no pieces), and each of you gets its item. One-off interactions (the fridge, the van, the pot, switches) happen in both games (experimental). |
 | **Supplies** | Ammo, healing and crafting materials picked up by one player disappear for the other. Weapons, keys, files and maps stay for both, so nobody gets stuck; when one of you takes one, the other is told to pick it up too. |
 | **Story** (experimental, off by default) | With **Share story** ticked, a cutscene or one of Jack's scripted moments that one of you starts also plays for the other when you're close together (same chapter, about 12 m). **VHS tapes:** when your friend puts one in, you follow them into it. |
 | **Deaths** | With your friend connected, a fatal hit puts you **down** instead of a game over, until your friend stands next to you for 3 seconds. |
@@ -47,11 +47,10 @@ your friend, and replaces only the mod files. **Both players need the same versi
 RE7's own full-body player models are incomplete (no real face). For complete characters in the Lobby, each
 player can add the Nexus mod **Third Person Full Model Placeholders** (RE7 mod 86, by AfroJackX):
 
-1. Download its **RT** main file from Nexus and unzip it.
-2. Copy its `natives` folder into your co-op folder (`Documents\RE7-coop` or `C:\RE7-coop`).
-3. With the game closed, double-click **Use full models.cmd** (in this download). It moves the mod's models into
-   a folder only the co-op mod reads, so your own first-person view stays normal, and switches on REFramework's
-   Loose File Loader.
+1. Download its **RT** main file from Nexus into your **Downloads** folder (no need to unzip it).
+2. With the game closed, double-click **Use full models.cmd** (in this download). It finds the download, copies
+   the models into a folder only the co-op mod reads (so your own first-person view stays normal), and switches
+   on REFramework's Loose File Loader.
 
 The Lobby then says "Full character models: installed".
 
@@ -113,8 +112,8 @@ switched off first). **Teleport to my friend** works once you're within 40 m of 
 
 - **One real two-player session so far.** Fixes since then (enemy hand-offs, doors closing, boxes, drawers,
   pausing, the Lobby, blocking, the story rework, everything new in v0.13) were tested alone or with the bot only.
-- **Animations:** your friend's character copies the moves RE7 plays on their body. Whether weapon swings and
-  shots are among them hasn't been tested yet. Scripted moments played by other actors (phone calls, the leg
+- **Animations:** your friend's character copies the moves RE7 plays on their body. Knife swings are tested (with
+  the bot, slightly choppy); other weapons use the same path but are untested. Scripted moments played by other actors (phone calls, the leg
   scene) aren't shown. In VHS tapes the character may slide instead of walking.
 - **Characters:** Mia (non-ship) has a gap on her left side and dark eyes, even with the full-model mod. Joe's
   hands are found by trying likely file names; he may still have none.

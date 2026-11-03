@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.16 (2026-11-03)
+Weapon swings, the held weapon and boxes were tested with the bot; boss mode is untested. Both players need v0.16.
+- **Boss mode**: in boss fights (Jack in the garage car fight and later) each game runs its own boss, so the
+  scripted fight works on both screens; damage and the defeat are still shared. Only the stalker Jack and the
+  Molded have their movement copied between games.
+- **Use full models.cmd** finds the mod download by itself (zip or folder, in Downloads, on the Desktop or next to
+  the script): no more copying its "natives" folder by hand.
+- **Weapon swings show**: your friend's character plays the right weapon's moves (knife swings tested with the
+  bot). Each weapon has its own animation set; the friend's body now uses the same one as yours.
+- **Weapon sits in the hand** at the right angle (it was stuck in the wrist).
+- **Smashed boxes are shared**: when your friend smashes one, it disappears in your game (no pieces: RE7 won't
+  redraw it as broken) and its item is left where it stood. Both players get a box's item (each game rolls its
+  own from the box's loot table, so they can differ).
+- Testing: the bot no longer vanishes when you swing, block or touch a door, and it holds what you hold.
+
 ## v0.15 (2026-11-03)
 First attempts at the remaining gaps; all untested in play, each with a way to see what happened in the logs:
 - **Enemies flinch from your friend's hits**: the enemy's own hit reaction is requested when your friend's damage

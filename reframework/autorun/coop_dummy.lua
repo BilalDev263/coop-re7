@@ -556,7 +556,9 @@ end
 -- Borrow the scene character's own motion bank (its clips on its skeleton) for
 -- the body piece, list the clips, and play walk/idle on layer 0.
 
-local anim = {
+local anim
+function coop_ghost_anim() return anim end   -- for probes
+anim = {
     src_root = nil,      -- scene character root GameObject
     motion = nil,        -- our body piece's via.motion.Motion
     clips = {},          -- { bank, id, name, frames }
@@ -602,6 +604,10 @@ local function list_clips(motion)
     local clips, out = {}, {}
     local info = safe(sdk.create_instance, "via.motion.MotionInfo")
     if info then safe(info.add_ref, info) end
+    -- The listing follows the weapon set the body is on (a knife set gave 823 clips and no
+    -- idle); list the bare-hands set. ghost_action puts the friend's set back.
+    safe(motion.call, motion, "set_TargetBankType", 0)
+    anim.bank = nil
     local nb = tonumber(safe(motion.call, motion, "getActiveMotionBankCount") or 0) or 0
     for b = 0, nb - 1 do
         local bank = safe(motion.call, motion, "getActiveMotionBank", b)
@@ -950,8 +956,25 @@ function ghost_action()
     local want = net.test_action or net.forced_action or net.peer_action or 0
     local src_layer = (net.test_action and (net.test_action_layer or 1))
         or (net.forced_action and (net.forced_action_layer or 0)) or (net.peer_action_layer or 1)
-    if want == (anim.action or 0) then return end
     local m = anim.motion
+    -- Weapon moves share IDs across the weapons' animation sets (all bank 0); the body's
+    -- TargetBankType picks the set (0 hands, 30 knife, 100 handgun...), as on the friend's
+    -- body. It must stay set while the clip plays: the clip binds a frame later (switching
+    -- back right after changeMotion bound nothing). Walk and idle stay the same clips.
+    local bank = (not net.test_action and not net.forced_action and held and held.bank_got) or 0
+    if bank ~= anim.bank or tonumber(safe(m.call, m, "get_TargetBankType")) ~= bank then
+        anim.bank = bank
+        safe(m.call, m, "set_TargetBankType", bank)
+    end
+    -- Weapon holding poses (20xx stand/walk/jog loops, 2200-2204 aim loops) use a mask that
+    -- covers the legs too (the player never sees their legs): while the body moves they froze
+    -- its walk into a slide, so they only play standing still. Swings and blocks always play.
+    if anim.moving and not net.forced_action and ((want >= 2000 and want < 2100) or (want >= 2200 and want <= 2204)) then
+        want = 0
+    end
+    -- (Tried 2026-11-03: merging 2002 into 2001 and fading the layer in/out over 0.15 s made
+    -- swings stop matching; the plain snap below looked better.)
+    if want == (anim.action or 0) then return end
     if (tonumber(safe(m.call, m, "getLayerCount") or 0) or 0) < 2 then
         safe(m.call, m, "setLayerCount", 2)
         if safe(m.call, m, "getLayer", 1) == nil then
@@ -980,8 +1003,8 @@ function ghost_action()
     end
     safe(L.call, L, "set_Speed", 1.0)
     safe(L.call, L, "set_BlendRate", 1.0)
-    log(string.format("action: friend plays motion %d from layer %d (mask %s, mode %s)", want, src_layer,
-        tostring(mask), tostring(mode)))
+    log(string.format("action: friend plays motion %d from layer %d (mask %s, mode %s, set %d, length %s)", want,
+        src_layer, tostring(mask), tostring(mode), bank, tostring(safe(L.call, L, "get_EndFrame"))))
 end
 
 local function auto_animate(anchor, anchor_rot)
@@ -2036,6 +2059,14 @@ local function drop_held()
     end
 end
 
+function apply_grip()
+    if held.part == nil then return end
+    local g = held.grip or { 0, 0, 0, 1, 0, 0, 0 }
+    local tr = held.part:call("get_Transform")
+    tr:call("set_LocalPosition", Vector3f.new(g[1], g[2], g[3]))
+    tr:call("set_LocalRotation", Quaternion.new(g[4], g[5], g[6], g[7]))
+end
+
 local function show_held()
     drop_held()
     if held.got == nil or held.got == "-" or (settings and settings.show_weapon == false) then return end
@@ -2059,9 +2090,8 @@ local function show_held()
     tr:call("set_Parent", root.go:call("get_Transform"))
     tr:call("set_SameJointsConstraint", false)
     tr:call("set_ParentJoint", "R_Wep")
-    tr:call("set_LocalPosition", Vector3f.new(0, 0, 0))
-    tr:call("set_LocalRotation", Quaternion.new(1, 0, 0, 0))
     held.part = go
+    apply_grip()
     log("weapon: friend holds " .. mesh)
 end
 function show_friend_weapon_again() show_held() end
@@ -2083,7 +2113,20 @@ re.on_frame(function()
                 log("weapon: holding " .. w .. "; components: " .. table.concat(names, ", "))
             end
             held.sent, held.sent_t = w, now
+            held.grip_sent = nil
             coop_send_event("weapon " .. w)
+        end
+        -- How the weapon sits on our hand's R_Wep joint (about 10 cm off it, turned): sent
+        -- so the friend's copy isn't stuck in the wrist.
+        local tr = w ~= "-" and held.local_go and safe(held.local_go.call, held.local_go, "get_Transform")
+        local lp = tr and safe(tr.call, tr, "get_LocalPosition")
+        local lq = tr and safe(tr.call, tr, "get_LocalRotation")
+        if lp and lq then
+            local g = string.format("%.3f %.3f %.3f %.4f %.4f %.4f %.4f", lp.x, lp.y, lp.z, lq.w, lq.x, lq.y, lq.z)
+            if g ~= held.grip_sent then
+                held.grip_sent = g
+                coop_send_event("grip " .. g)
+            end
         end
     end
     -- The friend's body was rebuilt (load, look change): put the weapon back, once per body.
@@ -2096,7 +2139,47 @@ re.on_frame(function()
     end
 end)
 
+-- Which weapon animation set our body uses (Motion.TargetBankType), checked 10 times a
+-- second: a swing follows a weapon switch quickly.
+re.on_frame(function()
+    local now = os.clock()
+    if now - (held.bank_t or 0) < 0.1 then return end
+    held.bank_t = now
+    local kv = net.kv or {}
+    if not ((kv.mode == "steam" or kv.mode == "bot") and coop_send_event) then return end
+    local player = get_player()
+    if player == nil then return end
+    if act.motion_go ~= player then
+        act.motion_go = player
+        act.motion = safe(player.call, player, "getComponent(System.Type)", sdk.typeof("via.motion.Motion"))
+    end
+    local m = act.motion
+    local b = m and tonumber(safe(m.call, m, "get_TargetBankType"))
+    if b and (b ~= held.bank_sent or now - (held.bank_sent_t or -100) > 20) then
+        held.bank_sent, held.bank_sent_t = b, now
+        coop_send_event("bank " .. b)
+    end
+end)
+
 function coop_lobby_on_event(text)
+    local grip = text:match("^grip (.+)$")
+    if grip then
+        local g = {}
+        for n in grip:gmatch("%S+") do g[#g + 1] = tonumber(n) end
+        if #g == 7 then
+            held.grip = g
+            pcall(apply_grip)
+        end
+        return true
+    end
+    local bk = tonumber(text:match("^bank (%d+)$"))
+    if bk then
+        if bk ~= held.bank_got then
+            held.bank_got = bk
+            log("weapon: friend's animation set " .. bk)
+        end
+        return true
+    end
     local w = text:match("^weapon (.+)$")
     if w then
         if w ~= held.got then

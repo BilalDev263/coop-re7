@@ -33,6 +33,44 @@ if (Get-Process re7 -ErrorAction SilentlyContinue) {
 }
 
 $stm = Join-Path $GameDir "natives\stm"
+
+# Not copied in yet? Look for the mod's download (zip or unzipped folder) in Downloads, on the
+# Desktop and next to this script, and copy its "natives" folder in. Its files belong to
+# their author, so coop-re7 never ships them; each player downloads the mod from Nexus.
+$already = (Test-Path (Join-Path $stm "coop\character\player\pl2000\pl2001\pl2001.mesh.220128762")) -or
+           (Test-Path (Join-Path $stm "character\player\pl2000\pl2001\pl2001.mesh.220128762"))
+if (-not $already) {
+    $places = @((Join-Path $env:USERPROFILE "Downloads"), [Environment]::GetFolderPath("Desktop"), $PSScriptRoot)
+    # Newest first; a zip always qualifies, a folder only if it still has a "natives" folder.
+    $found = $null
+    foreach ($p in $places) {
+        if ($found -or -not (Test-Path $p)) { continue }
+        foreach ($c in (Get-ChildItem $p -Filter "Third Person Full Model Placeholders*" -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending)) {
+            if ($c.Extension -eq ".zip" -or
+                (Get-ChildItem $c.FullName -Directory -Recurse -Filter "natives" -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                $found = $c
+                break
+            }
+        }
+    }
+    if ($found) {
+        Write-Host "  Found the mod download: $($found.Name)"
+        $from = $found.FullName
+        if ($found.Extension -eq ".zip") {
+            $tmp = Join-Path $env:TEMP ("coop-re7-fullmodels-" + [guid]::NewGuid().ToString("N"))
+            Expand-Archive -Path $found.FullName -DestinationPath $tmp -Force
+            $from = $tmp
+        }
+        $natives = Get-ChildItem $from -Directory -Recurse -Filter "natives" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($natives) {
+            Copy-Item -Path $natives.FullName -Destination $GameDir -Recurse -Force
+            Ok "copied the mod's files into the co-op folder"
+        } else { Warn "that download has no 'natives' folder" }
+        if ($found.Extension -eq ".zip") { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    }
+}
+
 $moved = 0
 foreach ($top in @("character", "ch8", "ch9")) {
     $src = Join-Path $stm $top
@@ -48,7 +86,11 @@ foreach ($top in @("character", "ch8", "ch9")) {
 $have = Test-Path (Join-Path $stm "coop\character\player\pl2000\pl2001\pl2001.mesh.220128762")
 if ($moved -gt 0) { Ok "moved $moved model files to natives\stm\coop" }
 elseif ($have) { Ok "model files already set up" }
-else { Warn "no model files found: copy the mod's 'natives' folder into $GameDir first"; exit 1 }
+else {
+    Warn "no model files found. Download 'Third Person Full Model Placeholders RT' from Nexus (RE7 mod 86)"
+    Warn "into your Downloads folder (no need to unzip it) and run this again."
+    exit 1
+}
 
 $cfg = Join-Path $GameDir "re2_fw_config.txt"
 if (Test-Path $cfg) {
