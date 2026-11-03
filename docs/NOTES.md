@@ -1114,3 +1114,7 @@ Not synced / broken, as reported by the owner:
 - Phone: InteractSendFsm under sm0113_Phone01A_AnswerPhoneCodex (stays IsEnable after answering, count 1).
   INTR_SKIP matched only the interactable's own name ("InteractSendFsm"), never the parent: now object/parent/
   grandparent. Phones sent as "intr <id> <ch> phone", applied when count is 0, pending if not loaded, in catch-up.
+- v0.21 (2026-11-03): window reorganized (Lobby, Talk and catch up, Connect and saving, Options, Help, Show
+  developer tools -> Developer tools; the Script Generated UI debug panel only with developer tools), settings
+  share_phones (checked on receipt of "intr ... phone") and dev_tools, coop_talk_hud() for the status line,
+  fresh-list reminder 2 s after the friend (re)connects when list entries have a chapter > friend's. Sim: 26 checks.

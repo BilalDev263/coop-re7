@@ -1,4 +1,4 @@
-# coop-re7: online co-op for Resident Evil 7 (prototype, v0.20)
+# coop-re7: online co-op for Resident Evil 7 (prototype, v0.21)
 
 Play Resident Evil 7 with a friend over the internet. Each of you sees the other as a full-body character (Ethan,
 or anyone you pick in the Lobby) who walks, jogs, crouches, sidesteps, looks around, blocks and acts where they do,
@@ -63,7 +63,7 @@ The Lobby then says "Full character models: installed".
    from the very first screen (no save yet) leaves the screen black. If the game asks to create save data,
    tick **Allow saving** in the RE7 Co-op window (Insert) first, then answer Yes.
 2. Press **Insert**. A **RE7 Co-op** window opens next to the REFramework menu. Expand
-   **Connect, saving and display**.
+   **Connect and saving**.
 3. Under *Your Steam friends in RE7 Co-op*, click **Connect** next to your friend's name. (They appear there
    once they've started RE7 Co-op too.)
 4. Your friend sees "*<your name>* invited you to co-op" at the top left of their screen. They press Insert and
@@ -80,37 +80,59 @@ Your friend is remembered, so next time it reconnects by itself. Connecting by S
 you start at the beginning of their chapter, then walk to each other. Nothing from the jump is saved (saving is
 switched off first). **Teleport to my friend** works once you're within 40 m of them.
 
-### Options (RE7 Co-op window)
+### The RE7 Co-op window
 
-| Option | What it does |
+Press **Insert**; the window opens next to the REFramework menu. Its sections:
+
+| Section | What's in it |
 |---|---|
 | **Lobby** | Both players, their chapters, and **You appear to your friend as**: Default (whoever you're playing), Ethan, Mia, Mia (ship), Clancy, Zoe, Chris, Joe. Without the full-model mod some lack a face. |
-| **Allow saving** | Off by default: nothing you do is saved. Turn on to save normally. Your save folder is backed up automatically (at every launch and when you turn this on; the last 20 backups are kept in `reframework\data\save_backups`). The co-op copy shares Steam Cloud saves with your normal RE7. When one of you saves, the other sees "Your friend saved" so you can both save at the same point. |
-| **Back up saves now** | An extra backup on demand. |
-| **Talk and catch up** | Quick-message buttons (the same as F5-F8, plus "Go on ahead"), a switch for the F5-F8 keys, your catch-up list, **Catch up now** (both ways, if something looks out of step), and **Start a fresh list** (when you start a new game together, so old changes aren't sent). |
-| **Make a bug report** | Puts a zip of the co-op logs on your desktop, with SteamIDs, Steam names and your Windows user name blanked out, ready to send. |
-| **On-screen status** | The top-left status lines (connection, ping, chapter, saving, what your friend just did). |
-| **Nameplate over your friend** | Their Steam name and distance above their character; when they're off screen, a pointer at the screen edge. |
-| **Show your friend's weapon** (experimental) | On by default. The weapon your friend holds appears in their character's hand. |
-| **Friend's footsteps** | Hear your friend's footsteps where they walk (walk, jog and crouch sounds). |
-| **Share story (cutscenes and progress, experimental)** | Off by default. When ticked, a story cutscene your friend reaches also plays for you, but only if you're in the same chapter and within about 12 m of them; otherwise you see it yourself when you get there. Story progress is copied only right after a cutscene you watched together, so a player who's behind is never pushed ahead. |
-| **Follow my friend into VHS tapes** | On by default. When your friend goes from your chapter into a tape, your game jumps into it after them a few seconds later (saving is switched off first). Never back out: finish the tape. |
-| **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes or item boxes). Turn off if one ever does something odd. **Phone calls** are always shared: when one of you answers, the other's phone is answered too. |
-| **Share pushed objects** (experimental) | On by default. Loose props one of you moves are moved in the other game too. |
-| **Go to my friend's chapter** | Jump to the start of the chapter your friend is in. Saving is switched off first. |
-| **Teleport to my friend** | Hop to them when you're within 40 m (same chapter). Further away, walk: RE7 only loads the area around you. |
-| **Show all online friends** | List every online Steam friend; connecting invites them for when they start RE7 Co-op. |
+| **Talk and catch up** | Quick-message buttons (the same as F5-F8, plus "Go on ahead"), a switch for the F5-F8 keys, your catch-up list, **Catch up now** (both ways, if something looks out of step), and **Start a fresh list** (when you start a new game together; you're reminded if your list has changes from a later chapter than your friend's). |
+| **Connect and saving** | Your Steam friends in RE7 Co-op (**Connect**, **Accept**), **Show all online friends**, connecting by SteamID, **Allow saving** and **Back up saves now**. |
+| **Options** | What's shown and what's shared (below). |
+| **Help** | **Go to my friend's chapter**, **Teleport to my friend**, **Fast-forward this cutscene**, **Fix my friend's character**, **Reload last save**, **Make a bug report**. |
+| **Show developer tools** | Off by default: the test bot and research tools (below). |
 
-**Testing** (for trying things alone):
+**Saving.** **Allow saving** is off by default: nothing you do is saved. Turn it on to save normally. Your save folder is
+backed up automatically (at every launch and when you turn this on; the last 20 backups are kept in
+`reframework\data\save_backups`). The co-op copy shares Steam Cloud saves with your normal RE7. When one of you saves,
+the other sees "Your friend saved" so you can both save at the same point.
+
+**Options:**
 
 | Option | What it does |
 |---|---|
-| **Test with bot** | A fake player. **Follow me**: it walks the path you walked and waits near you (and can revive you). **Walk in a circle**: it cycles every stance and direction. **Stay here**: it stands still. In the Lobby, **Dress the bot as** tries each character on it. |
-| **Bot: …** buttons | The bot "does" what a friend would: take down or hit the nearest enemy, open or unlock the nearest door, smash the nearest box, open or shut the nearest drawer, take the nearest supply, trigger the next story cutscene, pretend to be in another chapter. |
+| **On-screen status** | The top-left status lines (connection, ping, chapter, your friend's health, the last quick message, saving, what your friend just did). |
+| **Nameplate over your friend** | Their Steam name, health and distance above their character; when they're off screen, a pointer at the screen edge. |
+| **Friend's footsteps** | Hear your friend's footsteps where they walk (walk, jog and crouch sounds). |
+| **Share story (cutscenes and progress, experimental)** | Off by default. When ticked, a story cutscene your friend reaches also plays for you, but only if you're in the same chapter and within about 12 m of them; otherwise you see it yourself when you get there. Story progress is copied only right after a cutscene you watched together, so a player who's behind is never pushed ahead. |
+| **Show your friend's weapon** | On by default. The weapon or item your friend holds appears in their character's hand. |
+| **Follow my friend into VHS tapes** | On by default. When your friend goes from your chapter into a tape, your game jumps into it after them a few seconds later (saving is switched off first). Never back out: finish the tape. |
+| **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes or item boxes). Turn off if one ever does something odd. |
+| **Share pushed objects** (experimental) | On by default. Loose props one of you moves are moved in the other game too. |
+| **Share phone calls** | On by default. When one of you answers a phone, the other's phone is answered too (also when they get there later). Turn off if a call ever starts at a bad moment. |
+
+**Help:**
+
+| Button | What it does |
+|---|---|
+| **Go to my friend's chapter** | Shown when you're in different chapters: jump to the start of theirs. Saving is switched off first. |
+| **Teleport to my friend** | Hop to them when you're within 40 m (same chapter). Further away, walk: RE7 only loads the area around you. |
+| **Fast-forward this cutscene** | Runs the game 8x while the cutscene plays (nothing is skipped, it's just quicker). |
+| **Fix my friend's character** | Rebuilds your friend's character if it looks broken (T-pose, sliding, missing). |
+| **Reload last save** | What Continue does. Not after a chapter jump: restart the game instead. |
+| **Make a bug report** | Puts a zip of the co-op logs on your desktop, with SteamIDs, Steam names and your Windows user name blanked out, ready to send. |
+
+**Developer tools** (tick **Show developer tools**; for trying things alone):
+
+| Option | What it does |
+|---|---|
+| **Test with bot** | A fake player. **Follow me**: it walks the path you walked and waits near you (and can revive you). **Walk in a circle**: it cycles every stance and direction. **Stay here**: it stands still. **Dress the bot as** tries each character on it. |
+| **Bot: ...** buttons | The bot "does" what a friend would: take down or hit the nearest enemy, open or unlock the nearest door, smash the nearest box, open or shut the nearest drawer, take the nearest supply, trigger the next story cutscene, pretend to be in another chapter. |
 | **Take a fatal hit** | Go down on purpose (the bot revives you). |
-| **Fast-forward this cutscene** / **every cutscene** | Runs the game 8x while a cutscene plays (nothing is skipped, it's just quicker). |
+| **Fast-forward every cutscene** | Like the Help button, for every cutscene. |
 | **Chapter switcher** | Jump straight to any chapter. Only targets ending in `_Start` load into gameplay; saving is switched off first. |
-| **Rebuild Ethan** / **Reload last save** | Fix a broken-looking friend / reload your save (what Continue does; not after a chapter jump, restart instead). |
+| Research tools | Record and replay an enemy, hand an enemy to the bot, a reload test, and the ghost debug panel (REFramework menu, Script Generated UI). |
 
 ## Known limits
 
@@ -144,7 +166,7 @@ switched off first). **Teleport to my friend** works once you're within 40 m of 
 | "Waiting for your friend" | They need to click **Accept** (or **Connect** on you) |
 | "Friend's packets don't match" | You're on different coop-re7 versions; both install the same release |
 | "Friend is in another chapter" | Click **Go to my friend's chapter** |
-| Their label moves but no body | Wait a few seconds, or press **Rebuild Ethan** (Testing) |
+| Their label moves but no body | Wait a few seconds, or press **Fix my friend's character** (Help) |
 | Stuck after a cutscene, can't move | Restart the game and load again |
 | Black screen or outside the map after chapter jumps | Restart the game |
 | Black screen but you can move, on a brand-new game | Start a **New Game** alone, play the opening until you can walk, then connect |

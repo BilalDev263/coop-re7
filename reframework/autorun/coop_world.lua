@@ -544,9 +544,14 @@ function coop_world_on_event(text)
     if did then pcall(apply_prop, "drawer", did, don == "1", tonumber(dch)) return true end
     local iid, ich, itag = text:match("^intr (%S+) (%-?%d+) ?(%a*)")
     if iid then
-        -- Phone calls move the story on, so they're shared even with "Share interactions" off.
+        -- Phone calls move the story on, so they have their own switch ("Share phone calls",
+        -- on by default), apart from "Share interactions".
         local phone = itag == "phone"
-        if phone or interactions_shared() then pcall(apply_prop, "intr", iid, true, tonumber(ich), phone) end
+        if phone and settings and settings.share_phones == false then
+            log("phone call not shared (Share phone calls is off): " .. iid)
+        elseif phone or interactions_shared() then
+            pcall(apply_prop, "intr", iid, true, tonumber(ich), phone)
+        end
         return true
     end
     local sid, son, sch = text:match("^switch (%S+) ([01]) (%-?%d+)")

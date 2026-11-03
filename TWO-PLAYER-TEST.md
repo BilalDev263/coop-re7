@@ -22,7 +22,7 @@ two real players through every shared feature once, so problems show up in a kno
 
 ## 2. Meet up in Chapter 3 (5 min)
 
-- [ ] Both open **Testing → Chapter switcher** and click **Chapter3**, once each. (Or: one player clicks it,
+- [ ] Both tick **Show developer tools**, open **Developer tools → Chapter switcher** and click **Chapter3**, once each. (Or: one player clicks it,
       the other uses **Go to my friend's chapter**.)
 - [ ] Watch the dinner (fast-forward is fine) until you can both move.
 - [ ] Each can see the other's Ethan, with their name above it. Walk, jog and crouch around each other.
@@ -40,7 +40,7 @@ two real players through every shared feature once, so problems show up in a kno
 Jack appears soon after dinner. Saving is off, so getting hurt costs nothing.
 
 - [ ] Both see Jack in the same place, doing the same thing.
-- [ ] Shooting Jack on one screen lowers his health on the other (the RE7 Co-op window, *Testing*, shows
+- [ ] Shooting Jack on one screen lowers his health on the other (the RE7 Co-op window, *Developer tools*, shows
       "Enemy sync" with his health).
 - [ ] Knocking Jack down on one screen knocks him down on the other.
 - [ ] Walk away from Jack while your friend stays near him. He should keep chasing the nearer player
@@ -97,5 +97,5 @@ Playing from the start of the game. Note for each: works / doesn't / looks odd.
 
 ## Afterwards
 
-Each player clicks **Make a bug report** (RE7 Co-op window, *Connect, saving and display*) and sends the zip
+Each player clicks **Make a bug report** (RE7 Co-op window, *Help*) and sends the zip
 it puts on their desktop. SteamIDs and names are already blanked out.

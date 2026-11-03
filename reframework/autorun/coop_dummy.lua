@@ -1771,20 +1771,13 @@ local function draw_connect_body()
     local last = net.history[#net.history]
     if (kv.mode == "steam" or kv.mode == "bot") and last ~= nil and (os.clock() - last.t) < (NET_TIMEOUT or 2) then
         imgui.text("Friend's chapter: " .. chapter_name(net.peer_chapter) .. "   yours: " .. chapter_name(local_chapter()))
-        if imgui.button("Go to my friend's chapter") then join_friend() end
-        imgui.same_line()
-        imgui.text(join.msg)
     end
     if imgui.tree_node("Connect with a SteamID instead") then
         local ok, err = pcall(draw_steamid_connect)
         imgui.tree_pop()
         if not ok then imgui.text("error: " .. tostring(err)) end
     end
-    if imgui.button("Test with bot") then send_command("bot") end
-    if kv.mode == "bot" then
-        imgui.same_line()
-        imgui.text("(the bot is on: it walks around you)")
-    end
+    if kv.mode == "bot" then imgui.text("(test bot on: connecting to a friend turns it off)") end
     if kv.lastCommand and kv.lastCommand ~= "-" then imgui.text("Last change: " .. kv.lastCommand) end
 
     if imgui.separator then imgui.separator() end
@@ -1804,12 +1797,10 @@ local function draw_connect_body()
     end
     imgui.text("Last save backup: " .. tostring(kv.lastBackup or "-") .. " (" .. tostring(kv.backups or 0) .. " kept)")
     if imgui.button("Back up saves now") then send_command("backup manual") end
-    imgui.same_line()
-    -- CoopNet copies the co-op logs (SteamIDs, names and user name blanked) into a zip on
-    -- the desktop; the result shows on the "Last change" line.
-    if imgui.button("Make a bug report (zip on your desktop)") then send_command("report") end
+end
 
-    if imgui.separator then imgui.separator() end
+-- Options: what's shown and what's shared.
+local function draw_options()
     local hchanged, hv = imgui.checkbox("On-screen status", settings.hud)
     if hchanged then settings.hud = hv save_settings() end
     imgui.same_line()
@@ -1829,7 +1820,31 @@ local function draw_connect_body()
     if ic then settings.share_interactions = iv save_settings() end
     local pc, pv = imgui.checkbox("Share pushed objects (chairs, bottles; experimental)", settings.share_physics ~= false)
     if pc then settings.share_physics = pv save_settings() end
+    local phc, phv = imgui.checkbox("Share phone calls (one of you answers, both get the call)", settings.share_phones ~= false)
+    if phc then settings.share_phones = phv save_settings() end
+end
+
+-- Help: what to reach for when something goes wrong.
+local function draw_help()
+    local last = net.history[#net.history]
+    local fresh = last ~= nil and (os.clock() - last.t) < (NET_TIMEOUT or 2)
+    if fresh and net.peer_chapter and net.peer_chapter ~= local_chapter() then
+        if imgui.button("Go to my friend's chapter") then join_friend() end
+        imgui.same_line()
+    end
     if imgui.button("Teleport to my friend") then teleport_to_friend() end
+    imgui.same_line()
+    imgui.text(join.msg or "")
+    -- Cutscene fast-forward: the whole game runs 8x while a cutscene plays, so every
+    -- scripted step still happens; normal speed returns when it ends.
+    if imgui.button("Fast-forward this cutscene") then fast_forward(true) end
+    imgui.same_line()
+    if imgui.button("Fix my friend's character (rebuild it)") then pcall(build_ethan) end
+    if imgui.button("Reload last save") then request_reload() end
+    if reload_msg then imgui.same_line() imgui.text(reload_msg) end
+    -- CoopNet copies the co-op logs (SteamIDs, names and user name blanked) into a zip on
+    -- the desktop; the result shows on the "Last change" line under Connect and saving.
+    if imgui.button("Make a bug report (zip on your desktop)") then send_command("report") end
 end
 
 -- Chapter switcher (testing) ---------------------------------------------------------
@@ -2362,18 +2377,10 @@ local function draw_lobby()
             imgui.text("  In another chapter: click Go to my friend's chapter (below) to join them.")
         end
     else
-        imgui.text("Player 2: nobody yet. Invite a friend under Connect, saving and display.")
+        imgui.text("Player 2: nobody yet. Invite a friend under Connect and saving.")
     end
     if fresh and net.peer_chapter ~= local_chapter() and imgui.button("Go to my friend's chapter##lobby") then
         pcall(join_friend)
-    end
-    -- Test the looks alone: dress the bot as any character.
-    if kv.mode == "bot" then
-        imgui.text("Dress the bot as:")
-        for _, c in ipairs(CHARACTERS) do
-            imgui.same_line()
-            if imgui.button(c.name .. "##botlook") then coop_lobby_on_event("look " .. c.key) end
-        end
     end
 end
 
@@ -2394,19 +2401,20 @@ local function section(title, fn)
 end
 
 local function draw_testing()
+    local kvt = net.kv or {}
     if imgui.button("Test with bot") then send_command("bot") end
-    imgui.same_line()
-    if imgui.button("Rebuild Ethan") then pcall(build_ethan) end
-    imgui.same_line()
-    if imgui.button("Teleport to my friend") then teleport_to_friend() end
-    -- Cutscene fast-forward (testing): the whole game runs 8x while a cutscene plays,
-    -- so every scripted step still happens; normal speed returns when it ends.
-    if imgui.button("Fast-forward this cutscene") then fast_forward(true) end
-    imgui.same_line()
+    if kvt.mode == "bot" then
+        imgui.same_line()
+        imgui.text("(the bot is on: it follows you)")
+        -- Test the looks alone: dress the bot as any character.
+        imgui.text("Dress the bot as:")
+        for _, c in ipairs(CHARACTERS) do
+            imgui.same_line()
+            if imgui.button(c.name .. "##botlook") then coop_lobby_on_event("look " .. c.key) end
+        end
+    end
     local fc, fv = imgui.checkbox("Fast-forward every cutscene", settings.ff_cutscenes == true)
     if fc then settings.ff_cutscenes = fv save_settings() end
-    if imgui.button("Reload last save") then request_reload() end
-    if reload_msg then imgui.same_line() imgui.text(reload_msg) end
     imgui.same_line()
     if reload.running then
         if imgui.button("Stop reload test") then reload.running = false end
@@ -2506,9 +2514,13 @@ re.on_draw_ui(function()
             imgui.text("Status: " .. connection_text())
             section("Lobby", draw_lobby)
             if coop_talk_ui then section("Talk and catch up", coop_talk_ui) end
-            section("Connect, saving and display", draw_connect_body)
-            section("Testing", draw_testing)
-            imgui.text("Advanced and debug controls: Script Generated UI > coop_dummy (ghost body test)")
+            section("Connect and saving", draw_connect_body)
+            section("Options", draw_options)
+            section("Help", draw_help)
+            -- Bot tests and research tools, hidden unless asked for.
+            local dc, dv = imgui.checkbox("Show developer tools", settings.dev_tools == true)
+            if dc then settings.dev_tools = dv save_settings() end
+            if settings.dev_tools then section("Developer tools", draw_testing) end
         end)
         if not ok and not coop_window.err then coop_window.err = true log("window ERR " .. tostring(err)) end
     end
@@ -2564,6 +2576,7 @@ local function draw_connect_panel()
 end
 
 re.on_draw_ui(function()
+    if not (settings and settings.dev_tools) then return end
     if not imgui.tree_node("coop_dummy (ghost body test)") then return end
     draw_connect_panel()
     imgui.text("Showing: " .. current)
@@ -3268,6 +3281,9 @@ local function hud_lines()
     if fhp then
         out[#out + 1] = { string.format("Friend's health: %d%%", fhp), coop_friend_health_color(fhp) }
     end
+    local tl, tc = nil, nil
+    if coop_talk_hud then tl, tc = coop_talk_hud() end
+    if tl then out[#out + 1] = { tl, tc } end
     local inv = pending_invite and pending_invite()
     if inv then
         out[#out + 1] = { inv.name .. " invited you to co-op: press Insert, then Accept in the RE7 Co-op window", 0xFF7FFF8C }

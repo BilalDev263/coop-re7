@@ -160,6 +160,7 @@ local function watch_friend()
     if present and not talk.present then
         local gap = talk.absent_since and (now - talk.absent_since) or math.huge
         if not talk.ever_present or gap >= GAP_FOR_CATCHUP then
+            talk.check_fresh_at = os.clock() + 2   -- once the friend's chapter is known
             queue_all(talk.ever_present and string.format("friend back after %d s", math.floor(gap)) or "friend connected")
         end
         talk.ever_present = true
@@ -295,6 +296,43 @@ function coop_friend_health_color(pct)
     return 0xFF6B6BFF
 end
 
+-- The last quick message, for the status line (it stays 20 s there, after the pop-up).
+function coop_talk_hud()
+    if talk.msg and os.clock() - talk.msg_t < 20 and talk.msg:find("^Your friend: ") then
+        return "Last message: " .. talk.msg:sub(14), talk.msg_color
+    end
+    return nil
+end
+
+-- Fresh-list reminder. A catch-up change from a later chapter than the friend's (seen when
+-- they connect) suggests a new game: the list would then carry changes from the old one.
+-- Changes are only applied in the chapter they were made in, so nothing breaks; the
+-- reminder just offers "Start a fresh list".
+local function list_chapter(text)
+    local kind = text:match("^(%a+)")
+    if kind == "drawer" or kind == "switch" then return tonumber(text:match("^%a+ %S+ %d (%-?%d+)")) end
+    return tonumber(text:match("^%a+ %S+ (%-?%d+)"))
+end
+
+local function check_fresh_list()
+    local n = coop_net_state and coop_net_state()
+    local fch = n and n.peer_chapter
+    talk.stale = nil
+    if fch == nil or fch <= 0 then return end
+    local later = 0
+    for _, e in ipairs(talk.list) do
+        local ch = list_chapter(e.text)
+        if ch and ch > fch then later = later + 1 end
+    end
+    if later > 0 then
+        talk.stale = later
+        show_msg(string.format("%d of your catch-up changes are from a later chapter than your friend's: new game? " ..
+            "Start a fresh list (Talk and catch up)", later), 0xFF7FE6FF)
+        log(string.format("fresh-list reminder: %d changes from a later chapter than the friend's (%d)", later, fch))
+    end
+end
+coop_talk_list_chapter = list_chapter
+
 -- Drawing --------------------------------------------------------------------------------
 local function draw_mark(m)
     local p = player_pos()
@@ -338,6 +376,10 @@ re.on_frame(function()
             if talk.peer ~= nil and talk.peer ~= "-" and #talk.list > 0 then coop_talk_clear_list("new friend") end
             talk.peer = who
             talk.dirty = true
+        end
+        if talk.check_fresh_at and os.clock() >= talk.check_fresh_at then
+            talk.check_fresh_at = nil
+            pcall(check_fresh_list)
         end
         if k.mode == "steam" or k.mode == "bot" then
             watch_friend()
@@ -387,7 +429,11 @@ function coop_talk_ui()
     imgui.text("Last catch-up: " .. talk.last_catchup .. string.format(" | received from your friend: %d", talk.got_n))
     if imgui.button("Catch up now (both ways)") then coop_talk_catch_up_now() end
     imgui.same_line()
-    if imgui.button("Start a fresh list (new game)") then coop_talk_clear_list("button") end
+    if imgui.button("Start a fresh list (new game)") then coop_talk_clear_list("button") talk.stale = nil end
+    if talk.stale then
+        imgui.text(string.format("  %d changes are from a later chapter than your friend's. Started a new game together? " ..
+            "Start a fresh list.", talk.stale))
+    end
 end
 
 log("coop_talk loaded")

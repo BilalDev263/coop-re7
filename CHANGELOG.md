@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.21 (2026-11-03)
+The window cleanup was checked in game; the rest is small and tested offline. Works with v0.20.
+- **Tidier RE7 Co-op window**: Lobby, Talk and catch up, Connect and saving, **Options** (what's shown and
+  shared), **Help** (go to your friend's chapter, teleport, fast-forward a cutscene, fix your friend's
+  character, reload, bug report). The test bot and research tools are hidden behind **Show developer tools**;
+  no more buttons listed twice.
+- **Share phone calls** switch (on by default) in Options.
+- **Last quick message** stays on the status line for 20 seconds.
+- **Fresh-list reminder**: when your friend connects and your catch-up list has changes from a later chapter than
+  theirs (a new game?), you're offered **Start a fresh list**.
+
 ## v0.20 (2026-11-03)
 Tested with the bot: both hands, weapon up while walking, the item in hand. Phone sharing needs two players. Both players need v0.20 for the new moves (v0.19 still connects).
 - **Both hands move**: RE7 often plays one arm's move on one layer and the other arm's on another; only one
