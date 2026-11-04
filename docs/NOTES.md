@@ -1148,3 +1148,7 @@ Not synced / broken, as reported by the owner:
   within 2.5 m, friend hp < 100) to the friend via 'heal <pct>'; 'ehp' Molded health check-in every 3 s (lower wins,
   Em4xxx only); poll_doors live-set + send_once (2 s). Zip package/coop-re7-v0.24.zip. Hub draft applied in the fork
   (uncommitted): local/build/hub24.py.
+- v0.25 (2026-11-04): third session (short, v0.24): 87/106 remote door opens left state 0/1 (latched main-house
+  doors open via app.InteractDoor, untracked). Auto-close (state 6) no longer sent; close refused within 2.5 m;
+  open retried with OpenSide 0 and 1 after 0.7 s; method/field names of DoorPush, InteractDoor, InteractDetailSearch,
+  InteractSendFsm logged. Lockpick (keypicklock keylockset intr) applied but drawer stayed shut: unknown.

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.25 (2026-11-04)
+Door fixes from the third session (short, v0.24). Untested in play.
+- **Doors that swing shut by themselves no longer close on the other player**: only a door a player shuts is sent,
+  and a close never applies while you're standing in that doorway.
+- **Latched doors get more tries**: an open from your friend that doesn't take is retried from the door's other
+  sides, and the log says when a door needs its handle instead (most main-house doors), for the next fix.
+- The bug report lists what doors and lockpicked drawers can do, so they can be shared properly next.
+- Fixed a rare error while a load starts.
+
 ## v0.24 (2026-11-04)
 Untested in play. Use v0.24 on both sides (the game now tells you when the versions differ).
 - **Version check**: the status line names both versions when you and your friend run different ones.

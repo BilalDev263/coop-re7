@@ -115,6 +115,39 @@ local function refresh_doors()
     for id in pairs(ws.doors) do if not seen[id] then ws.doors[id] = nil end end
 end
 
+-- An "open" that didn't take (v0.25): 87 of 106 remote opens in three sessions left the door
+-- at state 0 or 1, the latched main-house doors. Checked 0.7 s later and retried from the
+-- other two sides (OpenSide 0 and 1; 2 was the only one used). Every try is logged.
+ws.open_retry = {}
+function check_open_retry(id, s, state, now)
+    local r = ws.open_retry[id]
+    if r == nil or now < r.t then return end
+    if is_open(state) or state == 4 then
+        log(string.format("door %s opened (state %d, side %s)", id, state, tostring(r.side)))
+        ws.open_retry[id] = nil
+        return
+    end
+    local side = table.remove(r.sides, 1)
+    if side == nil then
+        log(string.format("door %s didn't open (state %d): needs its handle (app.InteractDoor)", id, state))
+        ws.open_retry[id] = nil
+        return
+    end
+    ws.applying[id] = now
+    local ok, err = pcall(s.d.call, s.d, "requestAutoOpen(app.DoorPush.OpenSide)", side)
+    r.side, r.t = side, now + 0.7
+    if not ok then log("door " .. id .. " open side " .. side .. " ERR " .. tostring(err)) end
+end
+
+local function player_near_door(s, m)
+    local om = sdk.get_managed_singleton("app.ObjectManager")
+    local p = om and om:get_field("PlayerObj")
+    local pp = p and safe(function() return p:call("get_Transform"):call("get_Position") end)
+    local dp = safe(function() return s.d:call("get_GameObject"):call("get_Transform"):call("get_Position") end)
+    if pp == nil or dp == nil then return false end
+    return (pp.x - dp.x) ^ 2 + (pp.z - dp.z) ^ 2 < m * m
+end
+
 local function poll_doors(now)
     -- Only doors the scene still has (v0.24): one unloaded by an area change threw inside the
     -- game, like the pushed objects did (see poll_phys).
@@ -143,8 +176,12 @@ local function poll_doors(now)
             local ours = ws.applying[id] and now - ws.applying[id] < 3
             if s.locked and not locked and not ours then send_once("unlock", id) end
             if open and not s.open and not ours then send_once("open", id) end
-            if s.open and not open and not ours then send_once("close", id) end
-            s.locked, s.open = locked, open
+            -- A door that swings shut by itself goes through state 6 (auto-closing): that's the
+            -- game, not the player, and sending it slammed the door on the other player as
+            -- they walked through (2026-11-03). Only a close straight from open is sent.
+            if s.open and not open and not ours and state ~= 6 and s.state ~= 6 then send_once("close", id) end
+            s.locked, s.open, s.state = locked, open, state
+            pcall(check_open_retry, id, s, state, now)
         end
     end
 end
@@ -171,14 +208,16 @@ local function apply_door(kind, id, ch)
         local before = s.d:call("get_doorState")
         if not is_open(before) and not s.d:call("get_isLocked") then
             local ok, err = pcall(s.d.call, s.d, "requestAutoOpen(app.DoorPush.OpenSide)", 2)
-            log(string.format("opened door %s (state %s -> %s)%s", id, tostring(before),
-                tostring(safe(s.d.call, s.d, "get_doorState")), ok and "" or (" ERR " .. tostring(err))))
+            log(string.format("opening door %s (state %s)%s", id, tostring(before), ok and "" or (" ERR " .. tostring(err))))
+            ws.open_retry[id] = { t = os.clock() + 0.7, side = 2, sides = { 0, 1 } }
         else
             log(string.format("open door %s: already state %s, locked %s", id, tostring(before),
                 tostring(s.d:call("get_isLocked"))))
         end
     elseif kind == "close" then
-        if is_open(s.d:call("get_doorState")) then
+        if player_near_door(s, 2.5) then
+            log("close door " .. id .. ": not closed, you're in the doorway")
+        elseif is_open(s.d:call("get_doorState")) then
             local ok, err = pcall(s.d.call, s.d, "requestClosed(System.Boolean)", false)
             log("closed door " .. id .. (ok and "" or (" ERR " .. tostring(err))))
         end
@@ -359,6 +398,20 @@ end
 -- finished interaction the game reports (InteractObjectBase.successInteract) that isn't one of
 -- the kinds above is now written to this log with its type and names, so the next bug report
 -- shows what to add. Logging only: nothing is sent.
+-- What the latched doors and lockpicked drawers can do (v0.25): their method names go to the
+-- log once, so the next build can drive them. Names only: nothing is called.
+do
+    for _, tn in ipairs({ "app.DoorPush", "app.InteractDoor", "app.InteractDetailSearch", "app.InteractSendFsm" }) do
+        local td = sdk.find_type_definition(tn)
+        local names = {}
+        for _, m in ipairs(td and td:get_methods() or {}) do
+            names[#names + 1] = m:get_name() .. "/" .. m:get_num_params()
+        end
+        local fields = {}
+        for _, f in ipairs(td and td:get_fields() or {}) do fields[#fields + 1] = f:get_name() end
+        log(string.format("type %s: %d methods: %s | fields: %s", tn, #names, table.concat(names, " "), table.concat(fields, " ")))
+    end
+end
 local TRACKED_TYPES = {}
 for _, pt in ipairs(PROP_TYPES) do TRACKED_TYPES[pt.type] = true end
 do
@@ -536,7 +589,8 @@ end
 
 local function poll_phys(now)
     if not phys_shared() then return end
-    local player = sdk.get_managed_singleton("app.ObjectManager"):get_field("PlayerObj")
+    local om = sdk.get_managed_singleton("app.ObjectManager")   -- nil while a load starts
+    local player = om and om:get_field("PlayerObj")
     if player == nil then return end
     local pp = player:call("get_Transform"):call("get_Position")
     -- Which props still exist, asked of the scene first (v0.23): a door into another area
