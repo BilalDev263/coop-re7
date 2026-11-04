@@ -1142,3 +1142,9 @@ Not synced / broken, as reported by the owner:
   crouch/climb. Interaction finder: hooks InteractObjectBase successInteract/startInteract, logs untracked types
   ("not shared yet"). poll_phys checks a live set from findComponents first (565 get_Transform exceptions per game
   and 3 VMContext-corrupted warnings came from stale props after doors).
+- v0.24 (2026-11-04, untested): opt sync covers share_phones/interactions/physics (per-option default 'on'); 'ver' event +
+  status-line mismatch warning; report_req makes the friend's report too; report adds coop_catchup.txt and ev in/out;
+  friend hidden while climb.state (settings.hide_on_ladders); settings.heal_friend moves a heal (medicine held, friend
+  within 2.5 m, friend hp < 100) to the friend via 'heal <pct>'; 'ehp' Molded health check-in every 3 s (lower wins,
+  Em4xxx only); poll_doors live-set + send_once (2 s). Zip package/coop-re7-v0.24.zip. Hub draft applied in the fork
+  (uncommitted): local/build/hub24.py.

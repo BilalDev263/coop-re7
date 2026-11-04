@@ -229,15 +229,25 @@ end
 -- chapter 3 replayed). Now each is one setting for both: "opt <key> <0|1> <time>" goes out
 -- on a change and every 15 s, and the most recent change wins on both sides (a tie, e.g.
 -- two old settings files, turns it off: the safer way).
+-- v0.24: the other sharing switches too. on = the value when the settings file has none.
 local SHARED_OPTS = {
-    { key = "share_story", label = "Share story" },
-    { key = "share_supplies", label = "Share supplies" },
+    { key = "share_story", label = "Share story", on = false },
+    { key = "share_supplies", label = "Share supplies", on = false },
+    { key = "share_phones", label = "Share phone calls", on = true },
+    { key = "share_interactions", label = "Share interactions", on = true },
+    { key = "share_physics", label = "Share pushed objects", on = true },
 }
 local opts = { sent_t = -100 }
 
+local function opt_value(o)
+    local v = settings and settings[o.key]
+    if v == nil then return o.on end
+    return v == true
+end
+
 local function send_opt(o)
     if not (settings and coop_send_event) then return end
-    coop_send_event(string.format("opt %s %d %d", o.key, settings[o.key] == true and 1 or 0,
+    coop_send_event(string.format("opt %s %d %d", o.key, opt_value(o) and 1 or 0,
         tonumber(settings[o.key .. "_t"]) or 0))
 end
 
@@ -261,7 +271,7 @@ local function on_opt(key, v, t)
     local o
     for _, x in ipairs(SHARED_OPTS) do if x.key == key then o = x end end
     if o == nil then return end
-    local mine, mine_t = settings[key] == true, tonumber(settings[key .. "_t"]) or 0
+    local mine, mine_t = opt_value(o), tonumber(settings[key .. "_t"]) or 0
     if v == mine then return end
     if t > mine_t or (t == mine_t and not v) then
         settings[key], settings[key .. "_t"] = v, t
@@ -279,9 +289,42 @@ local function pump_opts()
     if now - opts.sent_t < 15 then return end
     opts.sent_t = now
     for _, o in ipairs(SHARED_OPTS) do send_opt(o) end
+    -- Our mod version, so a mismatch is named on screen (v0.24).
+    local v = kv().version
+    if v and v ~= "" and coop_send_event then coop_send_event("ver " .. v) end
+end
+
+-- The friend's mod version: a warning on the status line when it isn't ours.
+function coop_talk_version_warning()
+    local mine = kv().version
+    if talk.friend_ver == nil or mine == nil or talk.friend_ver == mine then return nil end
+    return string.format("Your friend has coop-re7 v%s and you have v%s: both install the same version",
+        talk.friend_ver, mine)
+end
+
+-- "Make a bug report" for both games at once (v0.24): ours asks theirs to make one too.
+function coop_talk_report_both()
+    if coop_send_event then coop_send_event("report_req") end
 end
 
 function coop_talk_on_event(text)
+    local hpct = tonumber(text:match("^heal (%d+)$"))
+    if hpct then
+        if coop_talk_apply_heal then pcall(coop_talk_apply_heal, hpct) end
+        return true
+    end
+    local fv = text:match("^ver (%S+)$")
+    if fv then
+        if fv ~= talk.friend_ver then log("friend's version: " .. fv) end
+        talk.friend_ver = fv
+        return true
+    end
+    if text == "report_req" then
+        fs.write("coopnet_command.txt", "report")
+        log("bug report: made on the friend's request")
+        show_msg("Your friend made a bug report: yours is on your desktop too, send it along", 0xFFBFBFBF)
+        return true
+    end
     local okey, ov, ot = text:match("^opt (%S+) ([01]) (%d+)$")
     if okey then
         on_opt(okey, ov == "1", tonumber(ot) or 0)
@@ -348,6 +391,60 @@ local function send_health()
         coop_send_event("hp " .. pct)
     end
 end
+
+-- Healing your friend (v0.24, Options, off by default). Use a healing item (the First Aid
+-- Med bottle, a herb mix) standing within HEAL_NEAR metres of your friend, and the health it
+-- gives goes to them instead: ours is put back and "heal <percent>" tells their game to add
+-- it. Only while a healing item is (or just was) in the hand, so a revive or a reload never
+-- counts.
+local HEAL_NEAR = 2.5
+local heal = { prev = nil, med_t = -100 }
+local HEAL_ITEMS = { "antiseptic", "remedy", "herb", "medic", "firstaid", "first_aid" }
+local function own_dc()
+    local om = sdk.get_managed_singleton("app.ObjectManager")
+    local p = om and om:get_field("PlayerObj")
+    return p and safe(p.call, p, "getComponent(System.Type)", sdk.typeof("app.PlayerDamageController")), p
+end
+local function friend_near(p)
+    local g = coop_ghost and coop_ghost()
+    local gp = g and safe(function() return g:call("get_Transform"):call("get_Position") end)
+    local pp = p and safe(function() return p:call("get_Transform"):call("get_Position") end)
+    if gp == nil or pp == nil then return false end
+    return (gp.x - pp.x) ^ 2 + (gp.y - pp.y) ^ 2 + (gp.z - pp.z) ^ 2 < HEAL_NEAR * HEAL_NEAR
+end
+local function watch_heal()
+    local dc, p = own_dc()
+    local h = dc and tonumber(safe(dc.call, dc, "get_health"))
+    local m = dc and tonumber(safe(dc.call, dc, "get_maxHealth"))
+    if h == nil or m == nil or m <= 0 then heal.prev = nil return end
+    local now = os.clock()
+    local w = (held and held.sent or ""):lower()
+    for _, k in ipairs(HEAL_ITEMS) do if w:find(k, 1, true) then heal.med_t = now end end
+    local prev = heal.prev
+    heal.prev = h
+    if prev == nil or h <= prev + 0.5 then return end
+    if not (settings and settings.heal_friend == true) or now - heal.med_t > 2 then return end
+    if not talk.present or hp.friend == nil or hp.friend >= 100 or not friend_near(p) then return end
+    local pct = math.floor((h - prev) / m * 100 + 0.5)
+    if pct < 1 then return end
+    safe(dc.call, dc, "setHealth(System.Single, System.Single)", prev, m)
+    heal.prev = prev
+    if coop_send_event then coop_send_event("heal " .. pct) end
+    log(string.format("healed the friend: %d%% (ours kept at %.0f)", pct, prev))
+    show_msg(string.format("You healed your friend (+%d%%)", pct), 0xFF7FFF8C)
+end
+local function on_heal(pct)
+    local dc = own_dc()
+    local h = dc and tonumber(safe(dc.call, dc, "get_health"))
+    local m = dc and tonumber(safe(dc.call, dc, "get_maxHealth"))
+    if h == nil or m == nil or m <= 0 or h <= 0 then return end
+    local new = math.min(m, h + m * pct / 100)
+    safe(dc.call, dc, "setHealth(System.Single, System.Single)", new, m)
+    heal.prev = new   -- not our own heal
+    log(string.format("friend healed us: +%d%% (%.0f -> %.0f)", pct, h, new))
+    show_msg(string.format("Your friend healed you (+%d%%)", pct), 0xFF7FFF8C)
+end
+coop_talk_apply_heal = on_heal
 
 -- The friend's health in percent, or nil when we haven't heard for 40 s.
 function coop_friend_health()
@@ -449,6 +546,7 @@ re.on_frame(function()
             watch_friend()
             pump_queue()
             send_health()
+            pcall(watch_heal)
             if talk.present then pump_opts() end
         end
         local now = os.clock()

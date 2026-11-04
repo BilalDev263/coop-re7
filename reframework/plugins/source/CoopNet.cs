@@ -550,7 +550,7 @@ public class CoopNet
         public float LookYaw, LookPitch;   // camera relative to body, radians
     }
 
-    const string Version = "0.23";
+    const string Version = "0.24";
     const int PacketSize = 64;
     static readonly byte[] Magic = { (byte)'R', (byte)'7', (byte)'C', (byte)'2' };
     const int KeepSamples = 32;
@@ -909,8 +909,11 @@ public class CoopNet
             var user = Environment.UserName;
             int n = 0;
             var files = new List<string>();
+            // v0.24: also the catch-up list and the last events each way, so a story or world
+            // mismatch (like Share story on for one player only) shows straight away.
             foreach (var pat in new[] { "coop_*_log.txt", "coop_dummy_log_prev.txt", "coop_settings.json",
-                         "coop_story_played.json", "coopnet_status.txt", "coopnet_config.json" })
+                         "coop_story_played.json", "coopnet_status.txt", "coopnet_config.json",
+                         "coop_catchup.txt", "coopnet_ev_in.txt", "coopnet_ev_out.txt" })
                 files.AddRange(Directory.GetFiles(s_dataDir, pat));
             var fwLog = Path.GetFullPath(Path.Combine(s_dataDir, "..", "..", "re2_framework_log.txt"));
             if (File.Exists(fwLog)) files.Add(fwLog);

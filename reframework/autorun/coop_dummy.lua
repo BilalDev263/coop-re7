@@ -1879,14 +1879,19 @@ local function draw_options()
     if sc then if coop_set_shared_option then coop_set_shared_option("share_story", sv) else settings.share_story = sv save_settings() end end
     local wc, wv = imgui.checkbox("Show your friend's weapon (experimental)", settings.show_weapon ~= false)
     if wc then settings.show_weapon = wv save_settings() pcall(show_friend_weapon_again) end
+    local hc, hv = imgui.checkbox("Heal my friend (use a healing item next to them: it heals them, not you; experimental)",
+        settings.heal_friend == true)
+    if hc then settings.heal_friend = hv save_settings() end
+    local lc, lv = imgui.checkbox("Hide my friend on ladders (there's no climbing animation)", settings.hide_on_ladders ~= false)
+    if lc then settings.hide_on_ladders = lv save_settings() end
     local tc, tv = imgui.checkbox("Follow my friend into VHS tapes", settings.follow_tapes ~= false)
     if tc then settings.follow_tapes = tv save_settings() end
     local ic, iv = imgui.checkbox("Share interactions (fridge, van, switches; experimental)", settings.share_interactions ~= false)
-    if ic then settings.share_interactions = iv save_settings() end
+    if ic then if coop_set_shared_option then coop_set_shared_option("share_interactions", iv) else settings.share_interactions = iv save_settings() end end
     local pc, pv = imgui.checkbox("Share pushed objects (chairs, bottles; experimental)", settings.share_physics ~= false)
-    if pc then settings.share_physics = pv save_settings() end
+    if pc then if coop_set_shared_option then coop_set_shared_option("share_physics", pv) else settings.share_physics = pv save_settings() end end
     local phc, phv = imgui.checkbox("Share phone calls (one of you answers, both get the call)", settings.share_phones ~= false)
-    if phc then settings.share_phones = phv save_settings() end
+    if phc then if coop_set_shared_option then coop_set_shared_option("share_phones", phv) else settings.share_phones = phv save_settings() end end
     local suc, suv = imgui.checkbox("Share supplies (harder: one copy of ammo and healing; same for both)",
         settings.share_supplies == true)
     if suc then if coop_set_shared_option then coop_set_shared_option("share_supplies", suv) else settings.share_supplies = suv save_settings() end end
@@ -1912,7 +1917,11 @@ local function draw_help()
     if reload_msg then imgui.same_line() imgui.text(reload_msg) end
     -- CoopNet copies the co-op logs (SteamIDs, names and user name blanked) into a zip on
     -- the desktop; the result shows on the "Last change" line under Connect and saving.
-    if imgui.button("Make a bug report (zip on your desktop)") then send_command("report") end
+    if imgui.button("Make a bug report (zip on your desktop)") then
+        send_command("report")
+        -- Your friend's game makes one at the same moment: both halves of the session.
+        if coop_talk_report_both then coop_talk_report_both() end
+    end
 end
 
 -- Chapter switcher (testing) ---------------------------------------------------------
@@ -3006,11 +3015,16 @@ re.on_frame(function()
     -- From the newest sample, not anim.flags: that is only refreshed while the ghost
     -- animates, so once hidden for "their cutscene" it never saw the cutscene end.
     local theirs = last ~= nil and last.flags ~= nil and (last.flags & STANCE_CUTSCENE) ~= 0
-    local hide = stale or cutscene_now or theirs
+    -- On a ladder (v0.24): RE7 has no body animation for climbing, so the friend floated up it.
+    -- Their character is hidden for the climb instead (Options: "Hide my friend on ladders").
+    local laddering = climb.state ~= nil and not (settings and settings.hide_on_ladders == false)
+    local hide = stale or cutscene_now or theirs or laddering
     if hide ~= ghost_hidden then
         ghost_hidden = hide
         for _, p in ipairs(parts) do pcall(p.go.call, p.go, "set_DrawSelf", not hide) end
-        local why = stale and "no data for 2 s" or cutscene_now and "you're in a cutscene" or theirs and "they're in a cutscene" or ""
+        if held and held.part then pcall(held.part.call, held.part, "set_DrawSelf", not hide) end
+        local why = stale and "no data for 2 s" or cutscene_now and "you're in a cutscene" or theirs and "they're in a cutscene"
+            or laddering and "they're on a ladder" or ""
         log(hide and ("ghost hidden: " .. why) or "ghost shown")
         cs.apply_t = now
     elseif now - (cs.apply_t or 0) > 0.5 then
@@ -3018,6 +3032,7 @@ re.on_frame(function()
         -- steps that switch every piece on, leaving a frozen, nameless Ethan on screen.
         cs.apply_t = now
         for _, p in ipairs(parts) do pcall(p.go.call, p.go, "set_DrawSelf", not ghost_hidden) end
+        if held and held.part then pcall(held.part.call, held.part, "set_DrawSelf", not ghost_hidden) end
     end
 end)
 
@@ -3379,6 +3394,8 @@ local function hud_lines()
         out[#out + 1] = { string.format("Friend is in %s (you're in %s): Go to my friend's chapter in the RE7 Co-op window",
             chapter_name(net.peer_chapter), chapter_name(local_chapter())), 0xFF7FE6FF }
     end
+    local vw = coop_talk_version_warning and coop_talk_version_warning()
+    if vw and fresh then out[#out + 1] = { vw, 0xFF6B6BFF } end
     -- Packets we can't decode usually mean the other player runs another mod version.
     local bad = tonumber(kv.bad or 0) or 0
     if bad > hud.bad_prev then hud.bad_t = os.clock() end

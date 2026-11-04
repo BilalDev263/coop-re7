@@ -153,7 +153,8 @@ local function send_event(text)
     while #es.ev_out > 30 do table.remove(es.ev_out, 1) end
     fs.write("coopnet_ev_out.txt", table.concat(es.ev_out, "\n") .. "\n")
     es.sent = es.sent + 1
-    log("sent: " .. text)
+    -- Regular check-ins (health, options, version) would fill the log: not logged.
+    if not (text:match("^ehp ") or text:match("^opt ") or text:match("^ver ")) then log("sent: " .. text) end
     if coop_talk_record then pcall(coop_talk_record, text) end   -- the catch-up list (coop_talk.lua)
 end
 
@@ -228,6 +229,20 @@ local function scan()
         end
     end
     for addr in pairs(es.tracked) do if not seen[addr] then es.tracked[addr] = nil end end
+    -- Health check-in for the Molded (v0.24): every 3 s each awake one's health goes out as
+    -- "ehp", and the game where it's higher lowers it to match. A damage message that never
+    -- arrived (a load, a rejoin) can't leave the same Molded with two different healths.
+    -- Never raised, never to 0 (the kill event does that), and not Jack or other bosses:
+    -- their scripted phases set their own health.
+    local now = os.clock()
+    if now - (es.ehp_t or 0) >= 3 then
+        es.ehp_t = now
+        for _, e in pairs(es.tracked) do
+            if is_regular(e.name) and not e.dead and (e.hp or 0) > 0 and safe(e.go.call, e.go, "get_Update") == true then
+                send_event(string.format("ehp %s %d %.1f %s", e.id, chapter(), e.hp, e.name))
+            end
+        end
+    end
 end
 
 local function find_tracked(id)
@@ -291,6 +306,18 @@ local function on_damage(id, ch, amount, name)
     log(string.format("friend hit %s for %.0f: %.0f -> %.0f", name, amount, hp, e.hp))
 end
 
+local function on_ehp(id, ch, v, name)
+    if ch ~= chapter() or not is_regular(name) then return end
+    local e = find_tracked(id)
+    if e == nil or e.dead or safe(e.go.call, e.go, "get_Update") ~= true then return end
+    local hp = e.dc:call("get_health") or 0
+    if hp <= v + 1 then return end
+    local new = math.max(v, 1.0)
+    e.dc:call("setHealth(System.Single, System.Single)", new, e.dc:call("get_maxHealth"))
+    e.hp = e.dc:call("get_health")
+    log(string.format("health check: %s %.0f -> %.0f (matched the friend's)", name, hp, e.hp))
+end
+
 local function on_event(text)
     -- Catch-up batches and quick messages belong to coop_talk.lua (a catch-up batch is
     -- unpacked there and each change comes back through coop_apply_event).
@@ -313,6 +340,8 @@ local function on_event(text)
     end
     local oid, och, oname = text:match("^own (%S+) (%-?%d+) (%S+)")
     if oid then if enemy_move_on_own then enemy_move_on_own(oid, tonumber(och), oname) end return end
+    local hid, hch, hv, hname = text:match("^ehp (%S+) (%-?%d+) ([%d%.]+) (%S+)")
+    if hid then pcall(on_ehp, hid, tonumber(hch), tonumber(hv), hname) return end
     local did, dch, damt, dname = text:match("^dmg (%S+) (%-?%d+) ([%d%.]+) (%S+)")
     if did then on_damage(did, tonumber(dch), tonumber(damt), dname) return end
     local id, ch, name = text:match("^kill (%S+) (%-?%d+) (%S+)")

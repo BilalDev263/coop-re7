@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.24 (2026-11-04)
+Untested in play. Use v0.24 on both sides (the game now tells you when the versions differ).
+- **Version check**: the status line names both versions when you and your friend run different ones.
+- **All the sharing switches are one setting for both players**: Share phone calls, Share interactions and Share
+  pushed objects now work like Share story and Share supplies.
+- **Heal my friend** (Options, off by default): a healing item used next to your friend heals them instead.
+- **Your friend is hidden while climbing a ladder** instead of floating up it (Options: Hide my friend on ladders).
+- **Molded health check-in**: every 3 s both games compare each Molded's health and keep the lower one, so a lost
+  damage message can't leave them out of step. Jack and other bosses are left alone.
+- **Make a bug report makes one on both games** at once, and it now includes the catch-up list and the last
+  events each way.
+- Doors: no more errors when a door's area unloads, and each open or close is sent once (it went out twice).
+
 ## v0.23 (2026-11-04)
 Fixes from the first long session (2026-11-03). Use v0.23 on both sides.
 - **Share story and Share supplies are one setting for both players.** Ticking or unticking either changes it

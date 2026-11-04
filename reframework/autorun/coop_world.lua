@@ -116,16 +116,36 @@ local function refresh_doors()
 end
 
 local function poll_doors(now)
+    -- Only doors the scene still has (v0.24): one unloaded by an area change threw inside the
+    -- game, like the pushed objects did (see poll_phys).
+    local sc = scene()
+    local arr = sc and safe(sc.call, sc, "findComponents(System.Type)", sdk.typeof("app.DoorPush"))
+    if arr == nil then return end
+    local live = {}
+    for _, d in ipairs(arr:get_elements() or {}) do live[d:get_address()] = true end
+    ws.door_sent = ws.door_sent or {}
+    -- Each open or close went out twice (the door passes through a middle state): the same
+    -- message for the same door within 2 s is sent once.
+    local function send_once(kind, id)
+        local k = kind .. id
+        if ws.door_sent[k] and now - ws.door_sent[k] < 2 then return end
+        ws.door_sent[k] = now
+        send(string.format("%s %s %d", kind, id, chapter()))
+    end
     for id, s in pairs(ws.doors) do
         local d = s.d
-        local locked = safe(d.call, d, "get_isLocked") == true
-        local state = safe(d.call, d, "get_doorState") or 0
-        local open = is_open(state)
-        local ours = ws.applying[id] and now - ws.applying[id] < 3
-        if s.locked and not locked and not ours then send(string.format("unlock %s %d", id, chapter())) end
-        if open and not s.open and not ours then send(string.format("open %s %d", id, chapter())) end
-        if s.open and not open and not ours then send(string.format("close %s %d", id, chapter())) end
-        s.locked, s.open = locked, open
+        if not live[d:get_address()] then
+            ws.doors[id] = nil
+        else
+            local locked = safe(d.call, d, "get_isLocked") == true
+            local state = safe(d.call, d, "get_doorState") or 0
+            local open = is_open(state)
+            local ours = ws.applying[id] and now - ws.applying[id] < 3
+            if s.locked and not locked and not ours then send_once("unlock", id) end
+            if open and not s.open and not ours then send_once("open", id) end
+            if s.open and not open and not ours then send_once("close", id) end
+            s.locked, s.open = locked, open
+        end
     end
 end
 

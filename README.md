@@ -107,10 +107,12 @@ the other sees "Your friend saved" so you can both save at the same point.
 | **Friend's footsteps** | Hear your friend's footsteps where they walk (walk, jog and crouch sounds). |
 | **Share story (cutscenes and progress, experimental; same for both)** | Off by default. One setting for both: when either of you ticks or unticks it, it changes for the other too. When ticked, a story cutscene your friend reaches also plays for you, but only if you're in the same chapter and within about 12 m of them; otherwise you see it yourself when you get there. Story progress is copied only right after a cutscene you watched together, so a player who's behind is never pushed ahead. |
 | **Show your friend's weapon** | On by default. The weapon or item your friend holds appears in their character's hand. |
+| **Heal my friend** (experimental) | Off by default. Use a healing item while standing next to your friend (within about 2.5 m) and it heals them instead of you. |
+| **Hide my friend on ladders** | On by default. RE7 has no climbing animation for the body, so your friend's character disappears while they climb and comes back at the top. |
 | **Follow my friend into VHS tapes** | On by default. When your friend goes from your chapter into a tape, your game jumps into it after them a few seconds later (saving is switched off first). Never back out: finish the tape. |
-| **Share interactions** (experimental) | On by default. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes or item boxes). Turn off if one ever does something odd. |
-| **Share pushed objects** (experimental) | On by default. Loose props one of you moves are moved in the other game too. |
-| **Share phone calls** | On by default. When one of you answers a phone, the other's phone is answered too (also when they get there later). Turn off if a call ever starts at a bad moment. |
+| **Share interactions** (experimental) | On by default; one setting for both players. One-off interactions and switches one of you uses happen in the other game too (never saving, tapes or item boxes). Turn off if one ever does something odd. |
+| **Share pushed objects** (experimental) | On by default; one setting for both players. Loose props one of you moves are moved in the other game too. |
+| **Share phone calls** | On by default; one setting for both players. When one of you answers a phone, the other's phone is answered too (also when they get there later). Turn off if a call ever starts at a bad moment. |
 | **Share supplies** | Off by default: each of you gets your own ammo and healing. One setting for both, like Share story. Tick it for a harder game with one copy for both: what one picks up disappears for the other. |
 
 **Help:**
