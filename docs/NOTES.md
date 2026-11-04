@@ -1152,3 +1152,5 @@ Not synced / broken, as reported by the owner:
   doors open via app.InteractDoor, untracked). Auto-close (state 6) no longer sent; close refused within 2.5 m;
   open retried with OpenSide 0 and 1 after 0.7 s; method/field names of DoorPush, InteractDoor, InteractDetailSearch,
   InteractSendFsm logged. Lockpick (keypicklock keylockset intr) applied but drawer stayed shut: unknown.
+- v0.26 (2026-11-04): weapon overlap (video): rebuild path set held.part = nil while the old copy stayed on the
+  hand; two copies made at 21:27:40. held.all tracks every copy; drop_held detaches and hides all.

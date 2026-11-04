@@ -2252,12 +2252,22 @@ local function local_weapon()
     return found
 end
 
+-- Every weapon copy made is remembered (v0.25): after a rebuild the old one was forgotten
+-- ("went with the old body") while it was in fact still on the hand, so a pistol stayed
+-- stuck there and overlapped every weapon after it (video, 2026-11-03). Now all copies but
+-- the current one are hidden and detached.
+held.all = held.all or {}
 local function drop_held()
-    if held.part then
-        pcall(function() held.part:call("get_Transform"):call("set_Parent", nil) end)
-        pcall(held.part.call, held.part, "set_DrawSelf", false)
-        held.part = nil
+    if held.part then held.all[#held.all + 1] = held.part end
+    local done = {}
+    for _, go in ipairs(held.all) do
+        if not done[go] then
+            done[go] = true
+            pcall(function() go:call("get_Transform"):call("set_Parent", nil) end)
+            pcall(go.call, go, "set_DrawSelf", false)
+        end
     end
+    held.all, held.part = {}, nil
 end
 
 function apply_grip()
@@ -2293,6 +2303,7 @@ local function show_held()
     tr:call("set_SameJointsConstraint", false)
     tr:call("set_ParentJoint", "R_Wep")
     held.part = go
+    held.all[#held.all + 1] = go
     apply_grip()
     log("weapon: friend holds " .. mesh)
 end
@@ -2346,8 +2357,7 @@ re.on_frame(function()
     for _, q in ipairs(parts) do if q.is_root then root = q.go end end
     if held.got and held.got ~= "-" and root and root ~= held.root_go then
         held.root_go = root
-        held.part = nil   -- went with the old body
-        pcall(show_held)
+        pcall(show_held)   -- drops every earlier copy first
     end
 end)
 

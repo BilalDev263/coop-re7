@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.26 (2026-11-04)
+- **No more weapons overlapping in your friend's hand.** When their character was rebuilt (a load or a Lobby look
+  change) while a weapon message arrived, the old weapon copy stayed stuck on the hand and overlapped every weapon
+  after it (a pistol held up by the head, next to the knife). Every copy is now tracked and removed.
+
 ## v0.25 (2026-11-04)
 Door fixes from the third session (short, v0.24). Untested in play.
 - **Doors that swing shut by themselves no longer close on the other player**: only a door a player shuts is sent,
