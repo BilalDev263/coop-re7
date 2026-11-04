@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: two players on one PC
+- **Split screen on one PC**: `Split screen setup.cmd` and `split-screen/Start-RE7-SplitScreen.ps1` run two copies
+  of RE7 on one PC, one controller and one screen (or half screen) each, borderless. See `split-screen/README.md`.
+- **`udp` mode works for real play**: the copy with the lower local port runs the enemies (both copies share one
+  SteamID on one PC), and `udp` gets the features that were `steam`-only (held weapon, lobby look, enemy and pause
+  hand-offs, catch-up list, health, heal my friend).
+
 ## v0.25 (2026-11-04)
 Door fixes from the third session (short, v0.24). Untested in play.
 - **Doors that swing shut by themselves no longer close on the other player**: only a door a player shuts is sent,

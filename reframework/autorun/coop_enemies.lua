@@ -457,6 +457,18 @@ local function decide_role()
             return lower and "host" or "guest"
         end
     end
+    if kv.mode == "udp" then
+        -- Split screen on one PC (Couchlink): both copies share one SteamID, so the copy
+        -- with the lower local port hosts and the other follows.
+        if mv.udp_role == nil or os.clock() - (mv.udp_role_t or 0) > 5 then
+            mv.udp_role_t = os.clock()
+            local ok, c = pcall(json.load_file, "coopnet_config.json")
+            if ok and type(c) == "table" and tonumber(c.localPort) and tonumber(c.peerPort) then
+                mv.udp_role = (tonumber(c.localPort) < tonumber(c.peerPort)) and "host" or "guest"
+            end
+        end
+        if mv.udp_role then return mv.udp_role end
+    end
     return "host"
 end
 
@@ -799,7 +811,8 @@ function check_handoffs(now)
     -- Only to a real friend: the bot can't run enemies (in bot mode only the test button
     -- hands one over). Require "steam" rather than "not bot": a status file read while
     -- it was being rewritten has no mode line, and that once handed Jack to the bot.
-    if net_kv().mode ~= "steam" then return end
+    local net_mode = net_kv().mode
+    if net_mode ~= "steam" and net_mode ~= "udp" then return end  -- udp: split screen on one PC
     -- See watch_pause. A "paused" that never got its "back" (they quit) expires after 10 min.
     if mv.friend_paused and now - (mv.friend_paused_t or 0) > 600 then mv.friend_paused = false end
     if mv.friend_paused or mv.paused then return end
@@ -841,7 +854,8 @@ local function watch_pause(now)
     local paused = is_paused()
     if paused == (mv.paused or false) then return end
     mv.paused = paused
-    if net_kv().mode ~= "steam" then return end
+    local net_mode = net_kv().mode
+    if net_mode ~= "steam" and net_mode ~= "udp" then return end  -- udp: split screen on one PC
     send_event(paused and "pause 1" or "pause 0")
     if not paused then return end
     for _, e in pairs(es.tracked) do

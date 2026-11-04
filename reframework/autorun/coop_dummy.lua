@@ -1642,6 +1642,10 @@ local function connection_text()
         if fresh then return "Connected to your friend" end
         return "Waiting for your friend (they need to Accept, or click Connect on you)"
     end
+    if kv.mode == "udp" then
+        if fresh then return "Connected to the other player on this PC" end
+        return "Waiting for the other player on this PC"
+    end
     return "Mode: " .. tostring(kv.mode)
 end
 
@@ -1833,7 +1837,7 @@ local function draw_connect_body()
     imgui.text("Status: " .. connection_text())
     draw_friend_list()
     local last = net.history[#net.history]
-    if (kv.mode == "steam" or kv.mode == "bot") and last ~= nil and (os.clock() - last.t) < (NET_TIMEOUT or 2) then
+    if (kv.mode == "steam" or kv.mode == "bot" or kv.mode == "udp") and last ~= nil and (os.clock() - last.t) < (NET_TIMEOUT or 2) then
         imgui.text("Friend's chapter: " .. chapter_name(net.peer_chapter) .. "   yours: " .. chapter_name(local_chapter()))
     end
     if imgui.tree_node("Connect with a SteamID instead") then
@@ -2303,7 +2307,7 @@ re.on_frame(function()
     if now - (held.check_t or 0) < 0.25 then return end   -- was 1 s: the healing bottle showed late
     held.check_t = now
     local kv = net.kv or {}
-    if (kv.mode == "steam" or kv.mode == "bot") and coop_send_event then
+    if (kv.mode == "steam" or kv.mode == "bot" or kv.mode == "udp") and coop_send_event then
         local w = local_weapon()
         -- A knife only counts once it has been out for half a second (see local_weapon).
         if w:find("Knife", 1, true) and w ~= held.sent then
@@ -2358,7 +2362,7 @@ re.on_frame(function()
     if now - (held.bank_t or 0) < 0.1 then return end
     held.bank_t = now
     local kv = net.kv or {}
-    if not ((kv.mode == "steam" or kv.mode == "bot") and coop_send_event) then return end
+    if not ((kv.mode == "steam" or kv.mode == "bot" or kv.mode == "udp") and coop_send_event) then return end
     local player = get_player()
     if player == nil then return end
     if act.motion_go ~= player then
@@ -2424,7 +2428,7 @@ re.on_frame(function()
         log("lobby: full-model state now known; dressing again")
         pcall(build_ethan)
     end
-    if kv.mode ~= "steam" and kv.mode ~= "bot" then return end
+    if kv.mode ~= "steam" and kv.mode ~= "bot" and kv.mode ~= "udp" then return end
     local last = net.history[#net.history]
     if last == nil or os.clock() - last.t > 2 then return end
     if lobby.sent_look ~= (settings.look or "default") or os.clock() - lobby.sent_t > 15 then pcall(send_look) end

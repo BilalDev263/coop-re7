@@ -137,6 +137,11 @@ the other sees "Your friend saved" so you can both save at the same point.
 | **Chapter switcher** | Jump straight to any chapter. Only targets ending in `_Start` load into gameplay; saving is switched off first. |
 | Research tools | Record and replay an enemy, hand an enemy to the bot, a reload test, and the ghost debug panel (REFramework menu, Script Generated UI). |
 
+## Two players on one PC
+
+Want to play on one PC, each with a controller and a screen? Run `Split screen setup.cmd` once after
+`Install.cmd`; see [split-screen/README.md](split-screen/README.md).
+
 ## Known limits
 
 - **One real two-player session so far.** Fixes since then (enemy hand-offs, doors closing, boxes, drawers,
