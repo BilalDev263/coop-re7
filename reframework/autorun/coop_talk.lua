@@ -1,4 +1,4 @@
--- coop_talk.lua: catching up after a rejoin, pings and quick messages (coop-re7 v0.19).
+-- coop_talk.lua: catching up after a rejoin, pings and quick messages (coop-re7 v0.23).
 --
 -- Catch-up. Every lasting change this game makes to the world (a door unlocked, a box
 -- smashed, a drawer or switch set, a supply taken, a Molded killed) is kept in a list, on
@@ -222,7 +222,71 @@ local function on_talk(kind, ch, x, y, z)
 end
 
 -- Called by coop_enemies.lua for every incoming event, before the other scripts.
+-- Shared options -------------------------------------------------------------------------
+-- "Share story" and "Share supplies" only work when both games agree: the first long
+-- session (2026-11-03) had story sharing on for one player and off for the other, so every
+-- story step was ignored on one side (wall never broken, puzzle and garage not unlocked,
+-- chapter 3 replayed). Now each is one setting for both: "opt <key> <0|1> <time>" goes out
+-- on a change and every 15 s, and the most recent change wins on both sides (a tie, e.g.
+-- two old settings files, turns it off: the safer way).
+local SHARED_OPTS = {
+    { key = "share_story", label = "Share story" },
+    { key = "share_supplies", label = "Share supplies" },
+}
+local opts = { sent_t = -100 }
+
+local function send_opt(o)
+    if not (settings and coop_send_event) then return end
+    coop_send_event(string.format("opt %s %d %d", o.key, settings[o.key] == true and 1 or 0,
+        tonumber(settings[o.key .. "_t"]) or 0))
+end
+
+-- Called by the RE7 Co-op window's checkboxes instead of setting the value directly.
+function coop_set_shared_option(key, value)
+    if not settings then return end
+    settings[key] = value == true
+    settings[key .. "_t"] = os.time()
+    if save_settings then save_settings() end
+    for _, o in ipairs(SHARED_OPTS) do
+        if o.key == key then
+            send_opt(o)
+            log(string.format("%s %s (changed here)", o.label, value and "on" or "off"))
+            show_msg(string.format("%s is now %s for both of you", o.label, value and "on" or "off"), 0xFFBFBFBF)
+        end
+    end
+end
+
+local function on_opt(key, v, t)
+    if not settings then return end
+    local o
+    for _, x in ipairs(SHARED_OPTS) do if x.key == key then o = x end end
+    if o == nil then return end
+    local mine, mine_t = settings[key] == true, tonumber(settings[key .. "_t"]) or 0
+    if v == mine then return end
+    if t > mine_t or (t == mine_t and not v) then
+        settings[key], settings[key .. "_t"] = v, t
+        if save_settings then save_settings() end
+        log(string.format("%s %s: matched the friend's setting", o.label, v and "on" or "off"))
+        show_msg(string.format("%s is now %s for both of you (your friend's setting)", o.label, v and "on" or "off"),
+            0xFFBFBFBF)
+    else
+        send_opt(o)   -- ours is newer: they take it
+    end
+end
+
+local function pump_opts()
+    local now = os.clock()
+    if now - opts.sent_t < 15 then return end
+    opts.sent_t = now
+    for _, o in ipairs(SHARED_OPTS) do send_opt(o) end
+end
+
 function coop_talk_on_event(text)
+    local okey, ov, ot = text:match("^opt (%S+) ([01]) (%d+)$")
+    if okey then
+        on_opt(okey, ov == "1", tonumber(ot) or 0)
+        return true
+    end
     local fh = tonumber(text:match("^hp (%d+)$"))
     if fh then
         hp.friend, hp.friend_t = fh, os.clock()
@@ -385,6 +449,7 @@ re.on_frame(function()
             watch_friend()
             pump_queue()
             send_health()
+            if talk.present then pump_opts() end
         end
         local now = os.clock()
         if talk.dirty and now - talk.save_t > 2 then talk.save_t = now save_list() end

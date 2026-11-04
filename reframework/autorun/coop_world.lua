@@ -303,7 +303,15 @@ local function interactions_shared() return not (settings and settings.share_int
 -- cutscene triggers. Matched on the names of the interactable's GameObject, its parent and
 -- grandparent: the interactable itself is mostly just "InteractSendFsm" and the telling name
 -- is on its parent (sm0113_Phone01A_AnswerPhoneCodex), so until v0.20 this list never matched.
-local INTR_SKIP = { "save", "tape", "video", "vhs", "record", "itembox", "event", "cs_" }
+-- Weapons and items stay per player (v0.23): the shotgun on the hall statue is a trap you
+-- disarm by putting the broken shotgun back. Sharing that statue let the friend take the
+-- shotgun for free (2026-11-03), so anything that hands out a weapon or an item is skipped.
+-- Nor anything that moves the player or opens a view: run on the other game, "get into the
+-- car" or "start the shadow puzzle" would do it to the friend wherever they stand (the car's
+-- get-in and get-out went across in the 2026-11-03 session).
+local INTR_SKIP = { "save", "tape", "video", "vhs", "record", "itembox", "event", "cs_",
+    "shotgun", "statue", "pendulum", "item", "wp0", "wp1", "wp2", "wp4",
+    "getinto", "getout", "ignition", "ethancar", "puzzle", "ladder", "hide", "crouch", "climb" }
 local function intr_names(c)
     local out = {}
     local go = safe(c.call, c, "get_GameObject")
@@ -324,6 +332,38 @@ local function intr_allowed(c)
     if names:find("phone", 1, true) then return true end
     for _, w in ipairs(INTR_SKIP) do if names:find(w, 1, true) then return false end end
     return true
+end
+
+-- Finding what isn't shared yet (v0.23). The garage-door button and the shadow puzzle's
+-- unlock never reached the other game, and nothing in the logs said what they are. Every
+-- finished interaction the game reports (InteractObjectBase.successInteract) that isn't one of
+-- the kinds above is now written to this log with its type and names, so the next bug report
+-- shows what to add. Logging only: nothing is sent.
+local TRACKED_TYPES = {}
+for _, pt in ipairs(PROP_TYPES) do TRACKED_TYPES[pt.type] = true end
+do
+    local seen = {}
+    local td = sdk.find_type_definition("app.InteractObjectBase")
+    local hooked = 0
+    for _, m in ipairs(td and td:get_methods() or {}) do
+        local mname = m:get_name()
+        if mname == "successInteract" or mname == "startInteract" then
+            local ok = pcall(sdk.hook, m, function(args)
+                pcall(function()
+                    local c = sdk.to_managed_object(args[2])
+                    if c == nil then return end
+                    local tn = c:get_type_definition():get_full_name()
+                    if TRACKED_TYPES[tn] and mname == "successInteract" then return end
+                    local key = mname .. ":" .. tn .. ":" .. tostring(id_of(c) or intr_names(c))
+                    if seen[key] then return end
+                    seen[key] = true
+                    log(string.format("not shared yet: %s %s (%s) id %s", mname, tn, intr_names(c), tostring(id_of(c))))
+                end)
+            end, function(r) return r end)
+            if ok then hooked = hooked + 1 end
+        end
+    end
+    log("interaction finder: " .. hooked .. " hooks")
 end
 
 local function refresh_props()
@@ -479,7 +519,21 @@ local function poll_phys(now)
     local player = sdk.get_managed_singleton("app.ObjectManager"):get_field("PlayerObj")
     if player == nil then return end
     local pp = player:call("get_Transform"):call("get_Position")
+    -- Which props still exist, asked of the scene first (v0.23): a door into another area
+    -- unloads them, and the first call on each gone one threw inside the game. Both logs of
+    -- the 2026-11-03 session had about 565 of those, in bursts at every door, and three
+    -- "VMContext was already corrupted" warnings, which can end in a crash.
+    local sc = scene()
+    local arr = sc and safe(sc.call, sc, "findComponents(System.Type)", sdk.typeof("app.Havok.RigidBodyDynamics"))
+    if arr == nil then return end
+    local live = {}
+    for _, c in ipairs(arr:get_elements() or {}) do live[c:get_address()] = true end
     for key, s in pairs(ws.phys) do
+        if not live[s.c:get_address()] then
+            ws.phys[key] = nil
+            if ws.phys_by_addr then ws.phys_by_addr[s.c:get_address()] = nil end
+            goto continue
+        end
         local tr = safe(s.go.call, s.go, "get_Transform")
         local p = tr and safe(tr.call, tr, "get_Position")
         if p == nil then
@@ -499,6 +553,7 @@ local function poll_phys(now)
                 s.last = { x = p.x, y = p.y, z = p.z }
             end
         end
+        ::continue::
     end
 end
 

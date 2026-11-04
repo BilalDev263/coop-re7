@@ -1081,6 +1081,26 @@ local function run_slot(m, idx, key, want, src_layer)
                 safe(m.call, m, "set_TargetBankType", ITEM_SET)
                 start_clip(L, want)
                 log(string.format("action: motion %d had no clip in set %s, retrying in the item set", want, tostring(was)))
+                anim[key .. "_retry2"] = os.clock() + 0.2
+            elseif L and (tonumber(safe(L.call, L, "get_EndFrame")) or 0) <= 0 then
+                anim[key .. "_retry2"] = os.clock()   -- already in the item set
+            end
+        end
+        -- Still nothing in the item set either: a move from a set the friend's character
+        -- doesn't have (Jack lifting Ethan, the bathroom scene). An unbound clip on a layer
+        -- shows the bind pose, the T-pose both players saw (2026-11-03): mute the layer, so
+        -- the character keeps its own stand or walk until the next move.
+        local rk2 = key .. "_retry2"
+        if anim[rk2] and os.clock() >= anim[rk2] then
+            anim[rk2] = nil
+            local L = safe(m.call, m, "getLayer", idx)
+            if L and (tonumber(safe(L.call, L, "get_EndFrame")) or 0) <= 0 then
+                safe(L.call, L, "set_BlendRate", 0.0)
+                anim.no_clip = anim.no_clip or {}
+                if not anim.no_clip[want] then
+                    anim.no_clip[want] = true
+                    log(string.format("action: motion %d has no clip on the friend's character: layer muted (no T-pose)", want))
+                end
             end
         end
         return
@@ -1105,7 +1125,7 @@ local function run_slot(m, idx, key, want, src_layer)
     if mode then safe(L.call, L, "set_BlendMode", mode) end
     safe(L.call, L, "set_Resource", nil)
     start_clip(L, want)
-    anim[key .. "_retry"] = os.clock() + 0.15
+    anim[key .. "_retry"], anim[key .. "_retry2"] = os.clock() + 0.15, nil
     safe(L.call, L, "set_Speed", 1.0)
     safe(L.call, L, "set_BlendRate", 1.0)
     log(string.format("action: friend plays motion %d from layer %d on slot %d (mask %s, mode %s, set %s)", want,
@@ -1853,9 +1873,10 @@ local function draw_options()
     imgui.same_line()
     local fchanged, fv = imgui.checkbox("Friend's footsteps", settings.footsteps ~= false)
     if fchanged then settings.footsteps = fv save_settings() end
-    -- Story cutscenes and progress follow whichever player reaches them first.
-    local sc, sv = imgui.checkbox("Share story (cutscenes and progress, experimental)", settings.share_story == true)
-    if sc then settings.share_story = sv save_settings() end
+    -- Story cutscenes and progress follow whichever player reaches them first. One setting
+    -- for both players (coop_talk.lua keeps the two games matched).
+    local sc, sv = imgui.checkbox("Share story (cutscenes and progress, experimental; same for both)", settings.share_story == true)
+    if sc then if coop_set_shared_option then coop_set_shared_option("share_story", sv) else settings.share_story = sv save_settings() end end
     local wc, wv = imgui.checkbox("Show your friend's weapon (experimental)", settings.show_weapon ~= false)
     if wc then settings.show_weapon = wv save_settings() pcall(show_friend_weapon_again) end
     local tc, tv = imgui.checkbox("Follow my friend into VHS tapes", settings.follow_tapes ~= false)
@@ -1866,9 +1887,9 @@ local function draw_options()
     if pc then settings.share_physics = pv save_settings() end
     local phc, phv = imgui.checkbox("Share phone calls (one of you answers, both get the call)", settings.share_phones ~= false)
     if phc then settings.share_phones = phv save_settings() end
-    local suc, suv = imgui.checkbox("Share supplies (harder: one copy of ammo and healing for both; set it the same)",
+    local suc, suv = imgui.checkbox("Share supplies (harder: one copy of ammo and healing; same for both)",
         settings.share_supplies == true)
-    if suc then settings.share_supplies = suv save_settings() end
+    if suc then if coop_set_shared_option then coop_set_shared_option("share_supplies", suv) else settings.share_supplies = suv save_settings() end end
 end
 
 -- Help: what to reach for when something goes wrong.
@@ -2178,8 +2199,11 @@ held = { sent = nil, sent_t = -100, got = nil, part = nil }
 local function local_weapon()
     local player = get_player()
     if player == nil then return "-" end
-    -- Walk the player's children (no references kept: this runs every second).
-    local found = "-"
+    -- Walk the player's children (no references kept: this runs every second). Every drawn
+    -- weapon or item is a candidate: the knife stays drawn for a moment while a gun comes out
+    -- or a heal starts, and being first in the list it won, so the friend saw a knife in the
+    -- hand with a gun or a bottle (2026-11-03). Anything else beats the knife now.
+    local found, found_go, knife, knife_go = "-", nil, nil, nil
     local function visit(go, depth)
         if found ~= "-" or depth > 8 then return end
         local name = tostring(safe(go.call, go, "get_Name") or "")
@@ -2196,9 +2220,13 @@ local function local_weapon()
             local mp = h and safe(h.call, h, "get_ResourcePath")
             local mdf = mh and safe(mh.call, mh, "get_ResourcePath")
             if mp and mdf then
-                found = tostring(mp):gsub("%.mesh$", "") .. " " .. tostring(mdf):gsub("%.mdf2$", "")
-                held.local_go = go
-                return
+                local w = tostring(mp):gsub("%.mesh$", "") .. " " .. tostring(mdf):gsub("%.mdf2$", "")
+                if w:find("Knife", 1, true) then
+                    if knife == nil then knife, knife_go = w, go end
+                else
+                    found, found_go = w, go
+                    return
+                end
             end
         end
         local tr = safe(go.call, go, "get_Transform")
@@ -2210,6 +2238,8 @@ local function local_weapon()
         end
     end
     visit(player, 0)
+    if found == "-" and knife then found, found_go = knife, knife_go end
+    if found_go then held.local_go = found_go end
     return found
 end
 
@@ -2266,6 +2296,13 @@ re.on_frame(function()
     local kv = net.kv or {}
     if (kv.mode == "steam" or kv.mode == "bot") and coop_send_event then
         local w = local_weapon()
+        -- A knife only counts once it has been out for half a second (see local_weapon).
+        if w:find("Knife", 1, true) and w ~= held.sent then
+            if held.knife_since == nil then held.knife_since = now end
+            if now - held.knife_since < 0.5 then w = held.sent or "-" end
+        else
+            held.knife_since = nil
+        end
         if w ~= held.sent or now - held.sent_t > 20 then
             if w ~= held.sent and w ~= "-" and held.local_go then
                 -- For weapon sounds later: what the held weapon is made of (logged once per weapon).

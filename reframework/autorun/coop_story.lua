@@ -83,8 +83,9 @@ end
 -- (tape ended early, washed-out picture, chapter change stuck), 2026-11-02.
 local function sharing() return settings ~= nil and settings.share_story == true end
 
+-- Story steps are always sent (v0.23), and applied only with Share story on: with it off the
+-- other game just keeps track of how far you are, to warn when your stories drift apart.
 local function send(text)
-    if not sharing() then return end
     if coop_send_event then coop_send_event(text) ss.sent = ss.sent + 1 log("sent: " .. text) end
 end
 
@@ -237,9 +238,51 @@ local function on_saved(kind, ch)
 end
 
 -- Called by coop_enemies.lua for every incoming event; true if it was ours.
+-- How far the friend's story is (their newest progress number per stage, this chapter).
+ss.friend_prog = {}
+local function track_friend(text)
+    local h, v, ch = text:match("^prog (%x+) (%-?%d+) (%-?%d+)")
+    if not h then return end
+    h, v, ch = tonumber(h, 16), tonumber(v), tonumber(ch)
+    local f = ss.friend_prog[h]
+    if f == nil or f.ch ~= ch or v > f.v then ss.friend_prog[h] = { v = v, ch = ch } end
+end
+
+-- Every 20 s: is one of us two or more story steps ahead (same chapter)? Then say so, at
+-- most every 3 minutes. Last session nobody could tell their stories had split until the
+-- wall didn't break.
+local drift = { t = 0, said_t = -1000 }
+re.on_frame(function()
+    local now = os.clock()
+    if now - drift.t < 20 then return end
+    drift.t = now
+    pcall(function()
+        local fm = flow_mgr()
+        if fm == nil then return end
+        local ch = chapter()
+        local ahead, behind = false, false
+        for h, f in pairs(ss.friend_prog) do
+            if f.ch == ch then
+                local var = fm:call("getProgressiveNo(System.UInt32)", h)
+                local mine = var and var:call("get_S32") or 0
+                if f.v >= mine + 200 then ahead = true end
+                if mine >= f.v + 200 and mine > 0 then behind = true end
+            end
+        end
+        ss.drift = ahead and "ahead" or behind and "behind" or nil
+        if ss.drift and now - drift.said_t > 180 then
+            drift.said_t = now
+            note(ss.drift == "ahead"
+                and "your friend is further on in the story than you: stay together, or use Go to my friend's chapter"
+                or "you are further on in the story than your friend: wait for them, or they can use Go to my friend's chapter")
+        end
+    end)
+end)
+
 function coop_story_on_event(text)
     local skind, sch = text:match("^saved (%a+) (%-?%d+)")
     if skind then pcall(on_saved, skind, tonumber(sch)) return true end
+    pcall(track_friend, text)
     if not sharing() and (text:match("^story ") or text:match("^prog ") or text:match("^evend ")) then
         log("story sharing is off, ignored: " .. text)
         return true

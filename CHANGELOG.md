@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.23 (2026-11-04)
+Fixes from the first long session (2026-11-03). Use v0.23 on both sides.
+- **Share story and Share supplies are one setting for both players.** Ticking or unticking either changes it
+  for your friend too. Last session had Share story on for one player and off for the other, so the other game
+  ignored every story step: the wall never broke, the garage and shadow puzzle stayed locked, chapter 3 replayed.
+- **The shotgun on the hall statue is no longer shared**, nor anything else that hands out a weapon or item: the
+  friend could take the shotgun without swapping in the broken one.
+- **The knife no longer shows** in your friend's hand when they hold a gun or heal.
+- **No more T-pose** when your friend does a move their character has no animation for (Jack lifting Ethan, the
+  bathroom scene): the character keeps standing or walking instead.
+- **Molded you don't control are visible**: one handed to your friend before it climbed out of the wall stayed
+  invisible on your screen while it attacked you.
+- **Smoother enemies** on the other player's screen (more updates and a bigger buffer; Jack was jittery).
+- **Story drift warning**: when one of you is two or more story steps ahead in the same chapter, the status
+  line says so (even with Share story off), so you notice before a wall or a door doesn't match.
+- **Car and puzzle interactions stay per player**: getting into or out of the car and starting the shadow puzzle
+  are no longer run on the other game.
+- **Fewer game exceptions at doors**: the pushed-objects check touched chairs and bottles the game had just
+  unloaded (about 565 errors per game last session, and three warnings that can end in a crash).
+- Interactions that aren't shared yet (like the garage-door button) are now named in the bug report, so they can
+  be added next.
+- Fixed: "your friend paused the game" never got through (an error in both logs).
+
 ## v0.22 (2026-11-03)
 Untested in play (a small change). Works with v0.21; set Share supplies the same on both sides.
 - **Each player gets their own supplies** by default (ammo, healing, crafting materials). **Share supplies** in

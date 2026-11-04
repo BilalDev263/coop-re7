@@ -302,9 +302,13 @@ local function on_event(text)
     if coop_revive_on_event and coop_revive_on_event(text) then return end
     local pz = text:match("^pause ([01])")
     if pz then
-        mv.friend_paused = pz == "1"
-        mv.friend_paused_t = os.clock()
-        note(mv.friend_paused and "your friend paused the game" or "your friend is back")
+        -- em_move, not mv: the local alias is declared further down, so "mv" here was a nil
+        -- global and every pause message failed (both logs, 2026-11-03).
+        if em_move then
+            em_move.friend_paused = pz == "1"
+            em_move.friend_paused_t = os.clock()
+        end
+        note(pz == "1" and "your friend paused the game" or "your friend is back")
         return
     end
     local oid, och, oname = text:match("^own (%S+) (%-?%d+) (%S+)")
@@ -393,8 +397,12 @@ em_move = {
     msg = "-", sent = 0, recv = 0,
 }
 local mv = em_move
-local MOVE_DELAY = 0.15
-local SNAP_EVERY = 0.1
+-- Smoother copies (v0.23): Jack was jittery on the other screen (2026-11-03). At 10 updates
+-- a second with 0.15 s of buffer, any late packet left the copy waiting at its last spot and
+-- then jumping; now 15 a second with 0.25 s of buffer (the copy runs a tenth of a second
+-- further behind, which you can't see).
+local MOVE_DELAY = 0.25
+local SNAP_EVERY = 1 / 15
 
 local kv_cache, kv_t = {}, -100
 local function net_kv()
@@ -624,12 +632,34 @@ local function set_brain(e, on)
     end
 end
 
+-- A copy is visible (v0.23). Molded wait hidden in walls and floors and their own AI shows
+-- them as they climb out; with the AI off here a copy that was handed over before it came out
+-- stayed invisible while it played the owner's attacks, so both players got hit by "invisible
+-- monsters" (2026-11-03). The copy's body mesh is switched on, and checked again every second.
+local function force_visible(e)
+    local go = e.go
+    if not safe(go.call, go, "get_DrawSelf") then safe(go.call, go, "set_DrawSelf", true) end
+    local m = e.mesh or safe(go.call, go, "getComponent(System.Type)", sdk.typeof("via.render.Mesh"))
+    e.mesh = m
+    local was_on = m and safe(m.call, m, "get_Enabled")
+    local was_draw = m and safe(m.call, m, "get_DrawDefault")
+    if m and was_on == false then safe(m.call, m, "set_Enabled", true) end
+    if m and was_draw == false then safe(m.call, m, "set_DrawDefault", true) end
+    if not e.vis_logged or was_on == false or was_draw == false then
+        e.vis_logged = true
+        log(string.format("copy %s visible: mesh %s, enabled %s, draw %s", e.name, tostring(m ~= nil),
+            tostring(was_on), tostring(was_draw)))
+    end
+end
+
 local function puppetize(e)
     if not safe(e.go.call, e.go, "get_Update") then
         -- Awake in the host's game: wake ours too.
         safe(e.go.call, e.go, "set_UpdateSelf", true)
         safe(e.go.call, e.go, "set_DrawSelf", true)
     end
+    pcall(force_visible, e)
+    e.vis_t = os.clock()
     set_brain(e, false)
     mv.puppets[e.id] = e
     log("puppet on: " .. e.name .. " " .. e.id)
@@ -662,6 +692,7 @@ local function lerp_angle(a, b, k)
 end
 
 local function drive(e, h, now)
+    if now - (e.vis_t or 0) > 1 then e.vis_t = now pcall(force_visible, e) end
     local t = now - MOVE_DELAY
     local a, b = h[1], h[#h]
     for i = #h - 1, 1, -1 do

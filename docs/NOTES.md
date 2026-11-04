@@ -1132,3 +1132,13 @@ Not synced / broken, as reported by the owner:
 - v0.22 (2026-11-03): settings.share_supplies (default off): apply_took and the pending-took loop only run when
   on; the sender still sends "took", so each game follows its own player's choice. Ladder detection code ships
   with LADDER_STAND_IN = false (log only).
+- v0.23 (2026-11-04): first long session fixes. share_story/share_supplies synced ("opt <key> <0|1> <os.time>",
+  newest wins, tie -> off; coop_set_shared_option in coop_talk.lua). INTR_SKIP adds shotgun/statue/pendulum/item/wpN.
+  local_weapon prefers non-knife items; knife needs 0.5 s. run_slot: clip still unbound after the item-set retry ->
+  layer BlendRate 0 (no T-pose). Puppets: force_visible (DrawSelf, Mesh Enabled/DrawDefault) on puppetize and every
+  1 s. MOVE_DELAY 0.25, SNAP_EVERY 1/15. Pause event used nil global mv -> em_move.
+  v0.23 more: story/prog/evend always sent (applied only with Share story); friend_prog drift warning every 20 s
+  (>=200 apart, same chapter, note every 3 min). INTR_SKIP + getinto/getout/ignition/ethancar/puzzle/ladder/hide/
+  crouch/climb. Interaction finder: hooks InteractObjectBase successInteract/startInteract, logs untracked types
+  ("not shared yet"). poll_phys checks a live set from findComponents first (565 get_Transform exceptions per game
+  and 3 VMContext-corrupted warnings came from stale props after doors).

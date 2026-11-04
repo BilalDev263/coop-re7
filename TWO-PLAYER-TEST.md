@@ -79,8 +79,8 @@ Playing from the start of the game. Note for each: works / doesn't / looks odd.
 - [ ] **Drawers and boxes**: A opens a drawer; A smashes a breakable box. On B's screen the box disappears and
       its item lies where it stood. **Both** can pick up an item from it.
 - [ ] **Pushed objects**: A knocks a chair or bottle around. Does it move for B?
-- [ ] **Supplies**: A picks up ammo. It stays for B (each gets their own). Then both tick **Share supplies**
-      (Options) and A picks up another: now it disappears for B. A walks into another area and back: B's other
+- [ ] **Supplies**: A picks up ammo. It stays for B (each gets their own). Then A ticks **Share supplies**
+      (Options; it turns on for B too) and A picks up another: now it disappears for B. A walks into another area and back: B's other
       supplies must still be there.
 - [ ] **Keys**: A picks up a key. B is told to pick it up too, and it's still there for B.
 - [ ] **VHS tape**: A puts a tape in (B nearby). B's game follows into the tape a few seconds later.
