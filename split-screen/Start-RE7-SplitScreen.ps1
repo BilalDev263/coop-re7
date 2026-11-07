@@ -151,6 +151,21 @@ if ($PlaceOnly) {
     if (-not (Test-Path $HookDll)) { throw "Couchlink's input hook is missing. Run 'Split screen setup.cmd' once." }
     if (-not (Get-Process steam -ErrorAction SilentlyContinue)) { throw 'Start Steam first.' }
     if (Get-Process re7 -ErrorAction SilentlyContinue) { throw 'RE7 is already running. Close it first.' }
+    # Both players need their own XInput pad. When one was missing (DS4Windows showing only one virtual Xbox pad), the
+    # copy without a pad read the PlayStation pad directly and one pad drove both players (2026-11-07).
+    Add-Type @"
+using System; using System.Runtime.InteropServices;
+public static class XPad { [StructLayout(LayoutKind.Sequential)] public struct S { public uint P; public ushort B; public byte LT, RT; public short LX, LY, RX, RY; }
+  [DllImport("xinput1_4.dll")] static extern uint XInputGetState(uint i, out S s);
+  public static bool On(int i) { S s; return XInputGetState((uint)i, out s) == 0; } }
+"@
+    $missing = @($Pads | Where-Object { -not [XPad]::On($_) })
+    if ($missing.Count -gt 0) {
+        $seen = @(0..3 | Where-Object { [XPad]::On($_) }).Count
+        throw ("Windows sees $seen XInput (Xbox) pad(s), not 2: pad $($missing -join ', ') is missing.`n`n" +
+               "PlayStation pads: open DS4Windows and check that BOTH controllers are listed (otherwise turn the missing one " +
+               "off and on again, or click Stop then Start), then start again.")
+    }
 
     # ---- player folders: big read-only files are hardlinks (no extra disk), the rest are real copies
     foreach ($n in 1, 2) {
